@@ -5,16 +5,241 @@ const TABS = [
   { id: 'settings', label: 'Settings' }
 ]
 
-const INITIAL_GESTURES = [
-  { id: 'swipe-left', title: 'Swipe Left', subtitle: 'Switch to previous tab', type: 'hand' },
-  { id: 'swipe-right', title: 'Swipe Right', subtitle: 'Switch to next tab', type: 'hand' },
-  { id: 'open-palm', title: 'Open Palm', subtitle: 'Play / Pause media', type: 'hand' },
-  { id: 'pinch', title: 'Pinch', subtitle: 'Volume down', type: 'hand' },
-  { id: 'spread', title: 'Spread', subtitle: 'Volume up', type: 'hand' },
-  { id: 'fist', title: 'Fist', subtitle: 'Mute / Unmute', type: 'hand' },
-  { id: 'two-finger-up', title: 'Two Finger Up', subtitle: 'Scroll up', type: 'hand' },
-  { id: 'two-finger-down', title: 'Two Finger Down', subtitle: 'Scroll down', type: 'hand' }
+const DEFAULT_GESTURES = [
+  {
+    id: 'dyn-magnitude-control',
+    title: 'Magnitude Control',
+    subtitle: 'Open Palm Up/Down for Increase/Decrease',
+    type: 'hand',
+    family: 'Magnitude Control Family',
+    controlModel: 'dynamic',
+    dynamicTargets: ['Volume', 'Brightness', 'Zoom', 'Scroll Speed', 'Playback Speed'],
+    enabled: true,
+    locked: true,
+    demo: 'up',
+    howTo: [
+      'Show a flat open palm with all fingers extended.',
+      'Move your hand up to increase the active parameter.',
+      'Move your hand down to decrease the active parameter.'
+    ]
+  },
+  {
+    id: 'dyn-cursor-control',
+    title: 'Cursor Control',
+    subtitle: 'Index Finger Pointing for Mouse Movement',
+    type: 'hand',
+    family: 'Cursor Control Family',
+    controlModel: 'dynamic',
+    dynamicTargets: ['Mouse Movement', 'Hover', 'UI Selection'],
+    enabled: true,
+    locked: true,
+    demo: 'right',
+    howTo: [
+      'Extend only the index finger and keep other fingers folded.',
+      'Move your pointing finger in space to move the cursor.',
+      'Pause over controls to hover and select targets.'
+    ]
+  },
+  {
+    id: 'dyn-grab-drag',
+    title: 'Grab and Drag',
+    subtitle: 'Pinch Hold to Grab, Move to Drag, Release to Drop',
+    type: 'hand',
+    family: 'Grab & Drag Family',
+    controlModel: 'dynamic',
+    dynamicTargets: ['Drag Windows', 'Move Files', 'Resize', 'Select Items'],
+    enabled: true,
+    locked: true,
+    demo: 'pinch',
+    howTo: [
+      'Pinch thumb and index to start a grab.',
+      'Keep pinch held while moving to drag objects.',
+      'Release pinch to drop at the current position.'
+    ]
+  },
+  {
+    id: 'dyn-navigation-control',
+    title: 'Navigation Control',
+    subtitle: 'Index Finger Left/Right for Back/Forward Navigation',
+    type: 'hand',
+    family: 'Navigation Family',
+    controlModel: 'dynamic',
+    dynamicTargets: [
+      'Switch Tabs',
+      'Switch Desktops',
+      'Slides Next/Previous',
+      'Timeline Scrubbing'
+    ],
+    enabled: true,
+    locked: true,
+    demo: 'right',
+    howTo: [
+      'Extend index finger and move horizontally.',
+      'Move left for previous/back actions.',
+      'Move right for next/forward actions.'
+    ]
+  },
+  {
+    id: 'dyn-rotation-dial',
+    title: 'Rotation Dial',
+    subtitle: 'Curved Hand Wrist Rotation for Knob-Style Controls',
+    type: 'hand',
+    family: 'Rotation / Dial Family',
+    controlModel: 'dynamic',
+    dynamicTargets: ['3D Rotation', 'Hue Adjustment', 'Knob Controls'],
+    enabled: true,
+    locked: true,
+    demo: 'hold',
+    howTo: [
+      'Keep an open but slightly curved hand shape.',
+      'Rotate wrist clockwise to increase dial value.',
+      'Rotate wrist anticlockwise to decrease dial value.'
+    ]
+  },
+  {
+    id: 'dyn-scroll-control',
+    title: 'Scroll Control',
+    subtitle: 'Two Fingers Up/Down for Continuous Scroll',
+    type: 'hand',
+    family: 'Scroll Family',
+    controlModel: 'dynamic',
+    dynamicTargets: ['Web Scroll', 'Code Scroll', 'Chat Scroll'],
+    enabled: true,
+    locked: true,
+    demo: 'up',
+    howTo: [
+      'Extend two fingers together.',
+      'Move upward to scroll up.',
+      'Move downward to scroll down.'
+    ]
+  },
+  {
+    id: 'st-fist-play-pause',
+    title: 'Closed Fist',
+    subtitle: 'Play / Pause',
+    type: 'hand',
+    family: 'Static Command Family',
+    controlModel: 'static',
+    defaultAction: 'Play/Pause Media',
+    enabled: true,
+    locked: true,
+    demo: 'hold',
+    howTo: [
+      'Form a clear closed fist gesture.',
+      'Hold for a short confirmation beat.',
+      'Triggers a one-time play/pause action.'
+    ]
+  },
+  {
+    id: 'st-thumbs-up-mute',
+    title: 'Thumbs Up',
+    subtitle: 'Mute / Unmute',
+    type: 'hand',
+    family: 'Static Command Family',
+    controlModel: 'static',
+    defaultAction: 'Mute/Unmute Audio',
+    enabled: true,
+    locked: true,
+    demo: 'up',
+    howTo: [
+      'Show a clear thumbs-up with stable hand orientation.',
+      'Keep gesture in frame for confirmation.',
+      'Toggles mute state once per trigger.'
+    ]
+  },
+  {
+    id: 'st-v-sign-next-prev',
+    title: 'V Sign',
+    subtitle: 'Next / Previous',
+    type: 'hand',
+    family: 'Static Command Family',
+    controlModel: 'static',
+    defaultAction: 'Navigate Next/Previous',
+    enabled: true,
+    locked: true,
+    demo: 'right',
+    howTo: [
+      'Show a clear V sign with index and middle finger.',
+      'Optional: slight right movement for next, left for previous.',
+      'Triggers discrete navigation command.'
+    ]
+  },
+  {
+    id: 'st-ok-sign-confirm',
+    title: 'OK Sign',
+    subtitle: 'Confirm / Enter',
+    type: 'hand',
+    family: 'Static Command Family',
+    controlModel: 'static',
+    defaultAction: 'Confirm / Enter',
+    enabled: true,
+    locked: true,
+    demo: 'pinch',
+    howTo: [
+      'Touch thumb and index finger into an OK circle.',
+      'Keep the gesture steady for a brief moment.',
+      'Sends one-time confirm action.'
+    ]
+  },
+  {
+    id: 'st-mode-switch-cycle',
+    title: 'Three-Finger Mode Switch',
+    subtitle: 'Hold to Cycle Active Control Mode',
+    type: 'hand',
+    family: 'Static Command Family',
+    controlModel: 'static',
+    defaultAction: 'Switch Active Dynamic Mode',
+    modeCycle: ['Volume', 'Brightness', 'Zoom', 'Scroll', 'Cursor'],
+    enabled: true,
+    locked: true,
+    demo: 'hold',
+    howTo: [
+      'Extend index, middle, and ring fingers only.',
+      'Hold for about one second to confirm mode switch.',
+      'Cycles control mode in order: Volume to Cursor.'
+    ]
+  },
+  {
+    id: 'st-drs-frame-power',
+    title: 'DRS Frame Power Command',
+    subtitle: 'Third Umpire Review Signal (Showcase Automation)',
+    type: 'hand',
+    family: 'Power Command Gesture',
+    controlModel: 'static',
+    defaultAction: 'Launch VS Code',
+    enabled: true,
+    locked: true,
+    demo: 'hold',
+    howTo: [
+      'Use two hands to form a review-frame/T shape.',
+      'Hold steady for around one second.',
+      'Default showcase action launches VS Code. Rebind later if needed.'
+    ]
+  }
 ]
+
+const HAND_TRAINING_CUES = [
+  'Center your hand in frame.',
+  'Rotate your hand slightly left and right.',
+  'Move closer, then farther for scale coverage.',
+  'Hold steady for final confirmation.'
+]
+
+const VOICE_TRAINING_CUES = [
+  'Speak your trigger phrase clearly.',
+  'Repeat with natural pace changes.',
+  'Record one low-volume and one strong sample.',
+  'Add one sample with mild background noise.'
+]
+
+const cloneDefaultGestures = () =>
+  DEFAULT_GESTURES.map((gesture) => ({
+    ...gesture,
+    enabled: gesture.enabled !== false,
+    howTo: Array.isArray(gesture.howTo) ? [...gesture.howTo] : []
+  }))
+
+const DEFAULT_LIBRARY_VISIBLE = 8
 
 const DEFAULT_SETTINGS = {
   selectedCameraId: '',
@@ -28,8 +253,10 @@ const DEFAULT_SETTINGS = {
 }
 
 const readBool = (value, fallback) => (typeof value === 'boolean' ? value : fallback)
-const readNum = (value, fallback) => (typeof value === 'number' && !Number.isNaN(value) ? value : fallback)
+const readNum = (value, fallback) =>
+  typeof value === 'number' && !Number.isNaN(value) ? value : fallback
 
+// eslint-disable-next-line react/prop-types
 function SidebarIcon({ tabId }) {
   if (tabId === 'gesture-library') {
     return (
@@ -136,7 +363,13 @@ function BrandLogo() {
         </clipPath>
       </defs>
       <circle cx="21" cy="21" r="18.4" fill="url(#oct-bg)" stroke="#bfd6f8" strokeWidth="1.2" />
-      <g clipPath="url(#oct-circle-clip)" stroke="url(#oct-spider)" strokeWidth="1.7" strokeLinecap="round" fill="none">
+      <g
+        clipPath="url(#oct-circle-clip)"
+        stroke="url(#oct-spider)"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        fill="none"
+      >
         <path d="M12 11l4.2 5M30 11l-4.2 5M8.8 17.5l6.2 2M33.2 17.5l-6.2 2M8.5 24.5l6.8-1.3M33.5 24.5l-6.8-1.3M11 30l5.4-4M31 30l-5.4-4" />
       </g>
       <g fill="url(#oct-spider)">
@@ -158,7 +391,7 @@ function App() {
       return false
     }
   })
-  const [gestures, setGestures] = useState(INITIAL_GESTURES)
+  const [gestures, setGestures] = useState(() => cloneDefaultGestures())
   const [selectedGesture, setSelectedGesture] = useState(null)
   const [editingGesture, setEditingGesture] = useState(null)
   const [showAddTypePopup, setShowAddTypePopup] = useState(false)
@@ -166,20 +399,29 @@ function App() {
   const [pendingGestureType, setPendingGestureType] = useState(null)
   const [pendingDeleteGesture, setPendingDeleteGesture] = useState(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [trainingSession, setTrainingSession] = useState(null)
+  const [showAllDefaultGestures, setShowAllDefaultGestures] = useState(false)
   const [settings, setSettings] = useState(() => {
     try {
       const raw = localStorage.getItem('octave:settings')
       if (!raw) return DEFAULT_SETTINGS
       const parsed = JSON.parse(raw)
       return {
-        selectedCameraId: typeof parsed.selectedCameraId === 'string' ? parsed.selectedCameraId : '',
+        selectedCameraId:
+          typeof parsed.selectedCameraId === 'string' ? parsed.selectedCameraId : '',
         selectedMicId: typeof parsed.selectedMicId === 'string' ? parsed.selectedMicId : '',
         gestureSensitivity: readNum(parsed.gestureSensitivity, DEFAULT_SETTINGS.gestureSensitivity),
         actionCooldownMs: readNum(parsed.actionCooldownMs, DEFAULT_SETTINGS.actionCooldownMs),
         launchOnStartup: readBool(parsed.launchOnStartup, DEFAULT_SETTINGS.launchOnStartup),
         notifications: readBool(parsed.notifications, DEFAULT_SETTINGS.notifications),
-        confirmBeforeDelete: readBool(parsed.confirmBeforeDelete, DEFAULT_SETTINGS.confirmBeforeDelete),
-        openMonitoringAfterAdd: readBool(parsed.openMonitoringAfterAdd, DEFAULT_SETTINGS.openMonitoringAfterAdd)
+        confirmBeforeDelete: readBool(
+          parsed.confirmBeforeDelete,
+          DEFAULT_SETTINGS.confirmBeforeDelete
+        ),
+        openMonitoringAfterAdd: readBool(
+          parsed.openMonitoringAfterAdd,
+          DEFAULT_SETTINGS.openMonitoringAfterAdd
+        )
       }
     } catch {
       return DEFAULT_SETTINGS
@@ -314,6 +556,8 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const videoElement = videoRef.current
+
     const startCamera = async () => {
       if (tab !== 'live-monitoring' || !settings.selectedCameraId) return
       try {
@@ -324,8 +568,8 @@ function App() {
           audio: false
         })
         cameraStreamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
+        if (videoElement) {
+          videoElement.srcObject = stream
         }
         setCameraStatus('connected')
       } catch (error) {
@@ -337,7 +581,7 @@ function App() {
     return () => {
       cameraStreamRef.current?.getTracks().forEach((t) => t.stop())
       cameraStreamRef.current = null
-      if (videoRef.current) videoRef.current.srcObject = null
+      if (videoElement) videoElement.srcObject = null
     }
   }, [tab, settings.selectedCameraId])
 
@@ -389,9 +633,64 @@ function App() {
     const query = search.trim().toLowerCase()
     if (!query) return gestures
     return gestures.filter(
-      (item) => item.title.toLowerCase().includes(query) || item.subtitle.toLowerCase().includes(query)
+      (item) =>
+        item.title.toLowerCase().includes(query) ||
+        item.subtitle.toLowerCase().includes(query) ||
+        (item.phrase && item.phrase.toLowerCase().includes(query)) ||
+        (item.family && item.family.toLowerCase().includes(query)) ||
+        (item.controlModel && item.controlModel.toLowerCase().includes(query))
     )
   }, [search, gestures])
+
+  const hasSearchQuery = search.trim().length > 0
+  const defaultFeatureGestures = filteredGestures.filter((item) => item.locked)
+  const customFeatureGestures = filteredGestures.filter((item) => !item.locked)
+  const visibleDefaultGestures =
+    hasSearchQuery || showAllDefaultGestures
+      ? defaultFeatureGestures
+      : defaultFeatureGestures.slice(0, DEFAULT_LIBRARY_VISIBLE)
+  const canShowMoreDefaults =
+    !hasSearchQuery && defaultFeatureGestures.length > visibleDefaultGestures.length
+  const canShowLessDefaults =
+    !hasSearchQuery &&
+    showAllDefaultGestures &&
+    defaultFeatureGestures.length > DEFAULT_LIBRARY_VISIBLE
+
+  const trainingStageMeta = useMemo(() => {
+    if (!trainingSession) return null
+    if (trainingSession.progress >= 100) {
+      return { label: 'Saved', detail: 'Profile ready' }
+    }
+    if (trainingSession.progress < 35) {
+      return { label: 'Capture', detail: 'Collecting samples' }
+    }
+    if (trainingSession.progress < 65) {
+      return { label: 'Quality Check', detail: 'Validating consistency' }
+    }
+    if (trainingSession.progress < 95) {
+      return { label: 'Model Training', detail: 'Building recognition profile' }
+    }
+    return { label: 'Finalizing', detail: 'Preparing command mapping' }
+  }, [trainingSession])
+
+  useEffect(() => {
+    if (!trainingSession || trainingSession.progress >= 100) return
+    const timer = setTimeout(() => {
+      setTrainingSession((prev) => {
+        if (!prev || prev.progress >= 100) return prev
+        const step = prev.type === 'voice' ? 9 : 7
+        const nextProgress = Math.min(100, prev.progress + step)
+        const cueList = prev.type === 'voice' ? VOICE_TRAINING_CUES : HAND_TRAINING_CUES
+        const cueIndex = Math.min(
+          cueList.length - 1,
+          Math.floor((nextProgress / 100) * cueList.length)
+        )
+        return { ...prev, progress: nextProgress, cueIndex }
+      })
+    }, 280)
+
+    return () => clearTimeout(timer)
+  }, [trainingSession])
 
   const settingsQuery = search.trim().toLowerCase()
   const matchesSettingsSection = (terms) => {
@@ -440,6 +739,10 @@ function App() {
 
   const handleEditSave = () => {
     if (!editingGesture) return
+    if (editingGesture.locked) {
+      setEditingGesture(null)
+      return
+    }
     const title = editingGesture.title.trim()
     const subtitle = editingGesture.subtitle.trim()
     if (!title || !subtitle) return
@@ -452,6 +755,10 @@ function App() {
 
   const handleDeleteConfirmed = (id) => {
     const removed = gestures.find((item) => item.id === id)
+    if (removed?.locked) {
+      setPendingDeleteGesture(null)
+      return
+    }
     setGestures((prev) => prev.filter((item) => item.id !== id))
     if (selectedGesture?.id === id) setSelectedGesture(null)
     setPendingDeleteGesture(null)
@@ -460,22 +767,51 @@ function App() {
     }
   }
 
+  const handleToggleDefaultGesture = (id) => {
+    setGestures((prev) =>
+      prev.map((item) =>
+        item.id === id && item.locked ? { ...item, enabled: item.enabled === false } : item
+      )
+    )
+  }
+
   const createGesture = (type) => {
     const id = `${type}-${Date.now()}`
     const created =
       type === 'voice'
-        ? { id, title: 'New Voice Gesture', subtitle: 'Sample voice trigger mapping', type: 'voice' }
-        : { id, title: 'New Hand Gesture', subtitle: 'Sample hand sign mapping', type: 'hand' }
+        ? {
+            id,
+            title: 'New Voice Gesture',
+            subtitle: 'Custom voice action mapping',
+            type: 'voice',
+            enabled: true,
+            locked: false,
+            phrase: 'Your custom phrase'
+          }
+        : {
+            id,
+            title: 'New Hand Gesture',
+            subtitle: 'Custom hand sign mapping',
+            type: 'hand',
+            enabled: true,
+            locked: false
+          }
     setGestures((prev) => [created, ...prev])
     void notifyUser('Gesture added', `${created.title} is ready to configure.`)
+    return created
+  }
+
+  const startTrainingSession = (gesture) => {
+    if (!gesture) return
+    setTrainingSession({
+      gestureId: gesture.id,
+      type: gesture.type,
+      progress: 0,
+      cueIndex: 0
+    })
   }
 
   const handleAddGestureType = (type) => {
-    if (!settings.openMonitoringAfterAdd) {
-      createGesture(type)
-      setShowAddTypePopup(false)
-      return
-    }
     setPendingGestureType(type)
     setShowAddTypePopup(false)
     setShowPermissionPopup(true)
@@ -484,16 +820,19 @@ function App() {
   const handleConfirmGestureCreation = async () => {
     if (!pendingGestureType) return
     const type = pendingGestureType
-    const granted = await requestDeviceAccess('both')
+    const granted = await requestDeviceAccess(type === 'voice' ? 'audio' : 'video')
     if (!granted) {
       setShowPermissionPopup(false)
       setPendingGestureType(null)
       return
     }
-    createGesture(type)
+    const created = createGesture(type)
+    startTrainingSession(created)
     setShowPermissionPopup(false)
     setPendingGestureType(null)
-    setTab('live-monitoring')
+    if (settings.openMonitoringAfterAdd) {
+      setTab('live-monitoring')
+    }
   }
 
   const handleLaunchOnStartupToggle = async (checked) => {
@@ -503,19 +842,265 @@ function App() {
       const result = await window.api.setStartupEnabled(checked)
       if (!result?.ok) {
         setSettings((prev) => ({ ...prev, launchOnStartup: false }))
-        void notifyUser('Startup setting unavailable', 'Launch on startup is not supported on this platform.', true)
+        void notifyUser(
+          'Startup setting unavailable',
+          'Launch on startup is not supported on this platform.',
+          true
+        )
         return
       }
       setSettings((prev) => ({ ...prev, launchOnStartup: Boolean(result.enabled) }))
       void notifyUser(
         'Startup setting updated',
-        result.enabled ? 'Octave will launch when your system starts.' : 'Octave will not auto-launch at startup.'
+        result.enabled
+          ? 'Octave will launch when your system starts.'
+          : 'Octave will not auto-launch at startup.'
       )
     } catch {
       setSettings((prev) => ({ ...prev, launchOnStartup: false }))
       void notifyUser('Startup update failed', 'Could not update launch on startup.', true)
     }
   }
+
+  const renderGestureDemo = (gesture) => {
+    if (!gesture) return null
+    const sceneMap = {
+      'dyn-magnitude-control': 'magnitude-control',
+      'dyn-cursor-control': 'cursor-control',
+      'dyn-grab-drag': 'grab-drag',
+      'dyn-navigation-control': 'navigation-control',
+      'dyn-rotation-dial': 'rotation-dial',
+      'dyn-scroll-control': 'scroll-control',
+      'st-fist-play-pause': 'fist-play-pause',
+      'st-thumbs-up-mute': 'thumbs-up-mute',
+      'st-v-sign-next-prev': 'v-sign-next-prev',
+      'st-ok-sign-confirm': 'ok-sign-confirm',
+      'st-mode-switch-cycle': 'mode-switch-cycle',
+      'st-drs-frame-power': 'third-umpire-review'
+    }
+
+    const captionMap = {
+      'dyn-magnitude-control': 'Open palm up/down for continuous increase/decrease.',
+      'dyn-cursor-control': 'Index finger pointing controls cursor movement.',
+      'dyn-grab-drag': 'Pinch-hold to grab, move to drag, release to drop.',
+      'dyn-navigation-control': 'Index left/right motion for back and forward.',
+      'dyn-rotation-dial': 'Rotate wrist clockwise or anticlockwise like a dial.',
+      'dyn-scroll-control': 'Two-finger up/down for continuous scroll.',
+      'st-fist-play-pause': 'Closed fist triggers a one-time play/pause.',
+      'st-thumbs-up-mute': 'Thumbs up toggles mute/unmute.',
+      'st-v-sign-next-prev': 'V sign runs next/previous command.',
+      'st-ok-sign-confirm': 'OK sign confirms current selection.',
+      'st-mode-switch-cycle': 'Hold three-finger gesture to cycle active mode.',
+      'st-drs-frame-power': 'Review-frame gesture triggers the power command.'
+    }
+
+    const scene =
+      sceneMap[gesture.id] || (gesture.type === 'voice' ? 'voice-next-window' : 'magnitude-control')
+
+    const renderHand = (variant = 'open') => (
+      <div className={`guide-hand ${variant}`}>
+        <span className="palm" />
+        <span className="finger f1" />
+        <span className="finger f2" />
+        <span className="finger f3" />
+        <span className="finger f4" />
+        <span className="finger f5" />
+      </div>
+    )
+
+    if (scene === 'voice-next-window' || scene === 'voice-prev-window') {
+      return (
+        <div className={`guide-scene scene-${scene}`} aria-hidden>
+          <div className="guide-stage guide-stage-voice">
+            <div className="guide-voice-mic">
+              <span className="mic-core" />
+              <span className="mic-ring" />
+              <span className="mic-ring ring-2" />
+            </div>
+            <div className="guide-voice-wave">
+              <span />
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="voice-window-stack">
+              <span className="window-a" />
+              <span className="window-b" />
+            </div>
+            <span
+              className={`guide-arrow ${scene === 'voice-next-window' ? 'arrow-right' : 'arrow-left'}`}
+            />
+          </div>
+          <small className="guide-caption">
+            {captionMap[gesture.id] || 'Voice command pattern.'}
+          </small>
+        </div>
+      )
+    }
+
+    if (scene === 'third-umpire-review') {
+      return (
+        <div className={`guide-scene scene-${scene}`} aria-hidden>
+          <div className="guide-stage guide-stage-third-umpire">
+            <div className="review-hands">
+              {renderHand('left-open')}
+              <span className="review-bar" />
+              {renderHand('right-open')}
+            </div>
+            <span className="review-pulse" />
+            <span className="review-text">REVIEW</span>
+          </div>
+          <small className="guide-caption">{captionMap[gesture.id] || 'Review signal hold.'}</small>
+        </div>
+      )
+    }
+
+    const handVariant =
+      scene === 'scroll-control'
+        ? 'two-finger'
+        : scene === 'mode-switch-cycle'
+          ? 'three-finger'
+          : scene === 'fist-play-pause'
+            ? 'fist'
+            : scene === 'thumbs-up-mute'
+              ? 'thumbs-up'
+              : scene === 'v-sign-next-prev'
+                ? 'two-finger'
+                : scene === 'ok-sign-confirm'
+                  ? 'ok-sign'
+                  : 'open'
+
+    const withTabs = scene === 'navigation-control'
+    const withModePanels = scene === 'mode-switch-cycle'
+
+    return (
+      <div className={`guide-scene scene-${scene}`} aria-hidden>
+        <div className="guide-stage">
+          {withTabs ? (
+            <div className="guide-context-tabs">
+              <span className="tab one" />
+              <span className="tab two" />
+              <span className="tab three" />
+            </div>
+          ) : null}
+          {withModePanels ? (
+            <div className="guide-context-modes">
+              <span className="mode-chip one">Vol</span>
+              <span className="mode-chip two">Bri</span>
+              <span className="mode-chip three">Zoom</span>
+              <span className="mode-chip four">Scroll</span>
+              <span className="mode-chip five">Cursor</span>
+            </div>
+          ) : null}
+          {scene === 'cursor-control' ? <span className="guide-cursor-dot" /> : null}
+          {scene === 'grab-drag' ? <span className="guide-drag-block" /> : null}
+          {scene === 'rotation-dial' ? <span className="guide-dial" /> : null}
+          {scene === 'fist-play-pause' ? <span className="guide-badge">Play / Pause</span> : null}
+          {scene === 'thumbs-up-mute' ? <span className="guide-badge">Mute Toggle</span> : null}
+          {scene === 'ok-sign-confirm' ? <span className="guide-badge">Confirm</span> : null}
+          {renderHand(handVariant)}
+          <span className="guide-arrow arrow-left" />
+          <span className="guide-arrow arrow-right" />
+          <span className="guide-arrow arrow-up" />
+          <span className="guide-arrow arrow-down" />
+          <span className="guide-hold-ring" />
+        </div>
+        <small className="guide-caption">
+          {captionMap[gesture.id] || 'Gesture motion pattern.'}
+        </small>
+      </div>
+    )
+  }
+
+  const activeTrainingGesture = useMemo(() => {
+    if (!trainingSession) return null
+    return gestures.find((gesture) => gesture.id === trainingSession.gestureId) || null
+  }, [gestures, trainingSession])
+
+  const activeTrainingCue =
+    trainingSession?.type === 'voice'
+      ? VOICE_TRAINING_CUES[trainingSession.cueIndex] || VOICE_TRAINING_CUES[0]
+      : HAND_TRAINING_CUES[trainingSession?.cueIndex] || HAND_TRAINING_CUES[0]
+
+  const renderGestureCard = (item) => (
+    <article
+      key={item.id}
+      className={`gesture-card ${item.locked ? 'gesture-card--locked' : ''} ${item.enabled === false ? 'gesture-card--disabled' : ''}`}
+      onClick={() => {
+        const selectedText = window.getSelection?.()?.toString().trim() || ''
+        if (selectedText) return
+        setSelectedGesture(item)
+      }}
+    >
+      <div>
+        <div className="gesture-card-tags">
+          <span className={`gesture-type-tag ${item.type === 'voice' ? 'voice' : 'hand'}`}>
+            {item.type === 'voice' ? 'Voice' : 'Hand'}
+          </span>
+          {item.controlModel ? (
+            <span className={`gesture-control-tag ${item.controlModel}`}>
+              {item.controlModel === 'dynamic' ? 'Dynamic' : 'Static'}
+            </span>
+          ) : null}
+          {item.locked ? <span className="gesture-lock-tag">Default</span> : null}
+        </div>
+        <h3>{item.title}</h3>
+        <p>{item.subtitle}</p>
+        {item.family ? <small className="gesture-family">{item.family}</small> : null}
+        {item.type === 'voice' && item.phrase ? (
+          <small className="gesture-phrase">Trigger: &ldquo;{item.phrase}&rdquo;</small>
+        ) : null}
+      </div>
+      {item.locked ? (
+        <div className="gesture-default-controls">
+          <span className={`feature-state ${item.enabled === false ? 'off' : 'on'}`}>
+            {item.enabled === false ? 'Disabled' : 'Enabled'}
+          </span>
+          <button
+            className={`feature-toggle-btn ${item.enabled === false ? 'off' : ''}`}
+            type="button"
+            aria-label={`${item.enabled === false ? 'Enable' : 'Disable'} ${item.title}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleToggleDefaultGesture(item.id)
+            }}
+          >
+            {item.enabled === false ? 'Enable' : 'Disable'}
+          </button>
+        </div>
+      ) : (
+        <div className="gesture-actions">
+          <button
+            className="icon-action"
+            type="button"
+            aria-label={`Edit ${item.title}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setEditingGesture(item)
+            }}
+          >
+            <EditIcon />
+          </button>
+          <button
+            className="icon-action danger"
+            type="button"
+            aria-label={`Delete ${item.title}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (settings.confirmBeforeDelete) {
+                setPendingDeleteGesture(item)
+              } else {
+                handleDeleteConfirmed(item.id)
+              }
+            }}
+          >
+            <DeleteIcon />
+          </button>
+        </div>
+      )}
+    </article>
+  )
 
   const isEditableTarget = (target) => {
     if (!(target instanceof HTMLElement)) return false
@@ -559,8 +1144,7 @@ function App() {
                 <SidebarIcon tabId={item.id} />
                 <span>{item.label}</span>
               </button>
-              )
-            )}
+            ))}
           </nav>
         </div>
 
@@ -572,7 +1156,13 @@ function App() {
 
       <section className="workspace">
         <header className="workspace-head">
-          <h2>{[...TABS, { id: 'live-monitoring', label: 'Live Monitoring' }].find((item) => item.id === tab)?.label}</h2>
+          <h2>
+            {
+              [...TABS, { id: 'live-monitoring', label: 'Live Monitoring' }].find(
+                (item) => item.id === tab
+              )?.label
+            }
+          </h2>
 
           <div className="head-actions">
             <button
@@ -596,10 +1186,18 @@ function App() {
             ) : null}
             {tab === 'gesture-library' ? (
               <>
-                <button className="secondary-btn" type="button" onClick={() => setShowResetConfirm(true)}>
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={() => setShowResetConfirm(true)}
+                >
                   Reset Defaults
                 </button>
-                <button className="primary-btn" type="button" onClick={() => setShowAddTypePopup(true)}>
+                <button
+                  className="primary-btn"
+                  type="button"
+                  onClick={() => setShowAddTypePopup(true)}
+                >
                   New Gesture
                 </button>
               </>
@@ -620,55 +1218,55 @@ function App() {
 
         <div className="workspace-body">
           {tab === 'gesture-library' ? (
-            <div className="gesture-grid">
-              {filteredGestures.map((item) => (
-                <article
-                  key={item.id}
-                  className="gesture-card"
-                  onClick={() => {
-                    const selectedText = window.getSelection?.()?.toString().trim() || ''
-                    if (selectedText) return
-                    setSelectedGesture(item)
-                  }}
-                >
-                  <div>
-                    <span className={`gesture-type-tag ${item.type === 'voice' ? 'voice' : 'hand'}`}>
-                      {item.type === 'voice' ? 'Voice' : 'Hand'}
-                    </span>
-                    <h3>{item.title}</h3>
-                    <p>{item.subtitle}</p>
+            <>
+              <section className="gesture-section">
+                <header className="gesture-section-head">
+                  <h3>Default Features</h3>
+                  <span>{defaultFeatureGestures.length}</span>
+                </header>
+                {visibleDefaultGestures.length > 0 ? (
+                  <div className="gesture-grid">
+                    {visibleDefaultGestures.map((item) => renderGestureCard(item))}
                   </div>
-                  <div className="gesture-actions">
-                    <button
-                      className="icon-action"
-                      type="button"
-                      aria-label={`Edit ${item.title}`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        setEditingGesture(item)
-                      }}
-                    >
-                      <EditIcon />
-                    </button>
-                    <button
-                      className="icon-action danger"
-                      type="button"
-                      aria-label={`Delete ${item.title}`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (settings.confirmBeforeDelete) {
-                          setPendingDeleteGesture(item)
-                        } else {
-                          handleDeleteConfirmed(item.id)
-                        }
-                      }}
-                    >
-                      <DeleteIcon />
-                    </button>
+                ) : (
+                  <div className="empty-state-card">No default features match this search.</div>
+                )}
+                {canShowMoreDefaults ? (
+                  <button
+                    className="secondary-btn show-more-btn"
+                    type="button"
+                    onClick={() => setShowAllDefaultGestures(true)}
+                  >
+                    Show More Default Features
+                  </button>
+                ) : null}
+                {canShowLessDefaults ? (
+                  <button
+                    className="secondary-btn show-more-btn"
+                    type="button"
+                    onClick={() => setShowAllDefaultGestures(false)}
+                  >
+                    Show Less
+                  </button>
+                ) : null}
+              </section>
+
+              <section className="gesture-section">
+                <header className="gesture-section-head">
+                  <h3>Custom Features</h3>
+                  <span>{customFeatureGestures.length}</span>
+                </header>
+                {customFeatureGestures.length > 0 ? (
+                  <div className="gesture-grid">
+                    {customFeatureGestures.map((item) => renderGestureCard(item))}
                   </div>
-                </article>
-              ))}
-            </div>
+                ) : (
+                  <div className="empty-state-card">
+                    No custom features yet. Use <strong>New Gesture</strong> to add one.
+                  </div>
+                )}
+              </section>
+            </>
           ) : null}
 
           {tab === 'live-monitoring' ? (
@@ -686,11 +1284,31 @@ function App() {
                 </div>
                 <p>Input Level: {micLevel}%</p>
               </section>
+              {trainingSession ? (
+                <section className="placeholder-panel training-inline">
+                  <h3>Training Progress</h3>
+                  <p>
+                    {activeTrainingGesture?.title || 'Custom Gesture'} - {trainingSession.progress}%
+                  </p>
+                  <div className="training-progress">
+                    <div style={{ width: `${trainingSession.progress}%` }} />
+                  </div>
+                  <small>
+                    {trainingStageMeta?.label}: {trainingStageMeta?.detail}
+                  </small>
+                </section>
+              ) : null}
               {!mediaReady || mediaError ? (
                 <section className="placeholder-panel monitor-alert">
                   <h3>Device Access</h3>
-                  <p>{mediaError || 'Camera and microphone access required for live monitoring.'}</p>
-                  <button className="primary-btn" type="button" onClick={requestDeviceAccess}>
+                  <p>
+                    {mediaError || 'Camera and microphone access required for live monitoring.'}
+                  </p>
+                  <button
+                    className="primary-btn"
+                    type="button"
+                    onClick={() => requestDeviceAccess('both')}
+                  >
                     Enable Camera & Microphone
                   </button>
                 </section>
@@ -702,117 +1320,125 @@ function App() {
             <div className="settings-stack">
               {showDeviceSettings ? (
                 <section className="settings-form-card">
-                <h3>Device Selection</h3>
-                <div className="form-grid">
-                  <label className="form-field">
-                    <span>Camera</span>
-                    <select
-                      value={settings.selectedCameraId}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          selectedCameraId: event.target.value
-                        }))
-                      }
-                    >
-                      {devices.cameras.map((device, idx) => (
-                        <option key={device.deviceId || `camera-${idx}`} value={device.deviceId}>
-                          {device.label || `Camera ${idx + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    <span>Microphone</span>
-                    <select
-                      value={settings.selectedMicId}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          selectedMicId: event.target.value
-                        }))
-                      }
-                    >
-                      {devices.microphones.map((device, idx) => (
-                        <option key={device.deviceId || `mic-${idx}`} value={device.deviceId}>
-                          {device.label || `Microphone ${idx + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <button className="modal-cancel" type="button" onClick={() => requestDeviceAccess('both')}>
-                  Refresh Devices
-                </button>
-              </section>
+                  <h3>Device Selection</h3>
+                  <div className="form-grid">
+                    <label className="form-field">
+                      <span>Camera</span>
+                      <select
+                        value={settings.selectedCameraId}
+                        onChange={(event) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            selectedCameraId: event.target.value
+                          }))
+                        }
+                      >
+                        {devices.cameras.map((device, idx) => (
+                          <option key={device.deviceId || `camera-${idx}`} value={device.deviceId}>
+                            {device.label || `Camera ${idx + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Microphone</span>
+                      <select
+                        value={settings.selectedMicId}
+                        onChange={(event) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            selectedMicId: event.target.value
+                          }))
+                        }
+                      >
+                        {devices.microphones.map((device, idx) => (
+                          <option key={device.deviceId || `mic-${idx}`} value={device.deviceId}>
+                            {device.label || `Microphone ${idx + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <button
+                    className="modal-cancel"
+                    type="button"
+                    onClick={() => requestDeviceAccess('both')}
+                  >
+                    Refresh Devices
+                  </button>
+                </section>
               ) : null}
 
               {showRuntimeSettings ? (
                 <section className="settings-form-card">
-                <h3>Gesture Runtime</h3>
-                <div className="form-grid">
-                  <label className="form-field">
-                    <span>Gesture Sensitivity ({settings.gestureSensitivity}%)</span>
-                    <input
-                      type="range"
-                      min="10"
-                      max="100"
-                      value={settings.gestureSensitivity}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          gestureSensitivity: Number(event.target.value)
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Action Cooldown (ms)</span>
-                    <input
-                      type="number"
-                      min="100"
-                      step="50"
-                      value={settings.actionCooldownMs}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          actionCooldownMs: Number(event.target.value || 0)
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="toggle-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={settings.launchOnStartup}
-                      disabled={!startupSupported}
-                      onChange={(event) => {
-                        void handleLaunchOnStartupToggle(event.target.checked)
-                      }}
-                    />
-                    Launch on Startup {!startupSupported ? '(Unsupported on this platform)' : ''}
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={settings.notifications}
-                      onChange={(event) => {
-                        const next = event.target.checked
-                        setSettings((prev) => ({
-                          ...prev,
-                          notifications: next
-                        }))
-                        if (next) {
-                          void notifyUser('Notifications enabled', 'You will now receive Octave updates.', true)
+                  <h3>Gesture Runtime</h3>
+                  <div className="form-grid">
+                    <label className="form-field">
+                      <span>Gesture Sensitivity ({settings.gestureSensitivity}%)</span>
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        value={settings.gestureSensitivity}
+                        onChange={(event) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            gestureSensitivity: Number(event.target.value)
+                          }))
                         }
-                      }}
-                    />
-                    Notifications
-                  </label>
-                </div>
-              </section>
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Action Cooldown (ms)</span>
+                      <input
+                        type="number"
+                        min="100"
+                        step="50"
+                        value={settings.actionCooldownMs}
+                        onChange={(event) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            actionCooldownMs: Number(event.target.value || 0)
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <div className="toggle-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={settings.launchOnStartup}
+                        disabled={!startupSupported}
+                        onChange={(event) => {
+                          void handleLaunchOnStartupToggle(event.target.checked)
+                        }}
+                      />
+                      Launch on Startup {!startupSupported ? '(Unsupported on this platform)' : ''}
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={settings.notifications}
+                        onChange={(event) => {
+                          const next = event.target.checked
+                          setSettings((prev) => ({
+                            ...prev,
+                            notifications: next
+                          }))
+                          if (next) {
+                            void notifyUser(
+                              'Notifications enabled',
+                              'You will now receive Octave updates.',
+                              true
+                            )
+                          }
+                        }}
+                      />
+                      Notifications
+                    </label>
+                  </div>
+                </section>
               ) : null}
 
               {showBehaviorSettings ? (
@@ -846,7 +1472,11 @@ function App() {
                       Open Live Monitoring after adding gesture
                     </label>
                     <label>
-                      <input type="checkbox" checked={darkMode} onChange={(event) => setDarkMode(event.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={darkMode}
+                        onChange={(event) => setDarkMode(event.target.checked)}
+                      />
                       Dark mode
                     </label>
                   </div>
@@ -856,7 +1486,10 @@ function App() {
               {!showDeviceSettings && !showRuntimeSettings && !showBehaviorSettings ? (
                 <section className="settings-form-card">
                   <h3>No Matching Settings</h3>
-                  <p>Try searching for camera, microphone, sensitivity, cooldown, delete, monitoring, or theme.</p>
+                  <p>
+                    Try searching for camera, microphone, sensitivity, cooldown, delete, monitoring,
+                    or theme.
+                  </p>
                 </section>
               ) : null}
             </div>
@@ -865,21 +1498,42 @@ function App() {
       </section>
 
       {showAddTypePopup ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setShowAddTypePopup(false)}>
-          <section className="modal-card modal-card-compact" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setShowAddTypePopup(false)}
+        >
+          <section
+            className="modal-card modal-card-compact"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>Add Gesture</h3>
             <p>Choose input mode</p>
             <div className="type-grid">
-              <button className="type-card" type="button" onClick={() => handleAddGestureType('hand')}>
+              <button
+                className="type-card"
+                type="button"
+                onClick={() => handleAddGestureType('hand')}
+              >
                 <strong>Hand Gesture</strong>
                 <small>Webcam landmarks</small>
               </button>
-              <button className="type-card" type="button" onClick={() => handleAddGestureType('voice')}>
+              <button
+                className="type-card"
+                type="button"
+                onClick={() => handleAddGestureType('voice')}
+              >
                 <strong>Voice Gesture</strong>
                 <small>Mic trigger phrase</small>
               </button>
             </div>
-            <button className="modal-cancel" type="button" onClick={() => setShowAddTypePopup(false)}>
+            <button
+              className="modal-cancel"
+              type="button"
+              onClick={() => setShowAddTypePopup(false)}
+            >
               Cancel
             </button>
           </section>
@@ -895,10 +1549,16 @@ function App() {
             setPendingGestureType(null)
           }}
         >
-          <section className="modal-card modal-card-compact" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+          <section
+            className="modal-card modal-card-compact"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>Allow Device Access</h3>
             <p>
-              Octave needs camera and microphone access to start {pendingGestureType === 'voice' ? 'voice' : 'hand'} gesture setup.
+              Octave needs {pendingGestureType === 'voice' ? 'microphone' : 'camera'} access to
+              start {pendingGestureType === 'voice' ? 'voice' : 'hand'} gesture setup.
             </p>
             <div className="modal-actions">
               <button
@@ -920,15 +1580,78 @@ function App() {
       ) : null}
 
       {selectedGesture ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setSelectedGesture(null)}>
-          <section className="modal-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setSelectedGesture(null)}
+        >
+          <section
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>{selectedGesture.title}</h3>
             <p>{selectedGesture.subtitle}</p>
-            <ul className="sample-meta">
-              <li>Sample confidence: 91%</li>
-              <li>Mapped action: {selectedGesture.subtitle}</li>
-              <li>Last trained: not set</li>
-            </ul>
+            {selectedGesture.locked ? (
+              <>
+                <div className="guide-demo-panel">{renderGestureDemo(selectedGesture)}</div>
+                {selectedGesture.type === 'voice' && selectedGesture.phrase ? (
+                  <p className="guide-phrase">
+                    Voice trigger: &ldquo;{selectedGesture.phrase}&rdquo;
+                  </p>
+                ) : null}
+                <ul className="guide-howto">
+                  {(selectedGesture.howTo || []).map((step, index) => (
+                    <li key={`${selectedGesture.id}-step-${index}`}>{step}</li>
+                  ))}
+                </ul>
+                <ul className="guide-meta-list">
+                  {selectedGesture.family ? (
+                    <li>
+                      <strong>Family:</strong> {selectedGesture.family}
+                    </li>
+                  ) : null}
+                  {selectedGesture.controlModel ? (
+                    <li>
+                      <strong>Control Type:</strong>{' '}
+                      {selectedGesture.controlModel === 'dynamic'
+                        ? 'Dynamic (Continuous)'
+                        : 'Static (One-Time)'}
+                    </li>
+                  ) : null}
+                  {selectedGesture.dynamicTargets?.length ? (
+                    <li>
+                      <strong>Targets:</strong> {selectedGesture.dynamicTargets.join(', ')}
+                    </li>
+                  ) : null}
+                  {selectedGesture.modeCycle?.length ? (
+                    <li>
+                      <strong>Mode Cycle:</strong> {selectedGesture.modeCycle.join(' -> ')}
+                    </li>
+                  ) : null}
+                  {selectedGesture.defaultAction ? (
+                    <li>
+                      <strong>Default Action:</strong> {selectedGesture.defaultAction}
+                    </li>
+                  ) : null}
+                </ul>
+                <p className="guide-readonly-note">
+                  Default actions are locked. Create a custom gesture if you want to modify
+                  behavior.
+                </p>
+                <p className="guide-readonly-note">
+                  Current state:{' '}
+                  <strong>{selectedGesture.enabled === false ? 'Disabled' : 'Enabled'}</strong>
+                </p>
+              </>
+            ) : (
+              <ul className="sample-meta">
+                <li>Sample confidence: 91%</li>
+                <li>Mapped action: {selectedGesture.subtitle}</li>
+                <li>Last trained: not set</li>
+              </ul>
+            )}
             <button className="modal-cancel" type="button" onClick={() => setSelectedGesture(null)}>
               Close
             </button>
@@ -936,16 +1659,89 @@ function App() {
         </div>
       ) : null}
 
+      {trainingSession ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setTrainingSession(null)}
+        >
+          <section
+            className="modal-card modal-card-training"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>
+              {trainingSession.type === 'voice'
+                ? 'Voice Command Training'
+                : 'Hand Gesture Training'}
+            </h3>
+            <p>
+              Training profile: <strong>{activeTrainingGesture?.title || 'Custom Gesture'}</strong>
+            </p>
+            <div className="training-progress">
+              <div style={{ width: `${trainingSession.progress}%` }} />
+            </div>
+            <div className="training-meta">
+              <span>{trainingSession.progress}%</span>
+              <span>{trainingStageMeta?.label}</span>
+            </div>
+            <p className="training-stage-detail">{trainingStageMeta?.detail}</p>
+            <p className="training-cue">{activeTrainingCue}</p>
+            {trainingSession.type === 'voice' ? (
+              <p className="guide-phrase">
+                Prompt phrase: &ldquo;{activeTrainingGesture?.phrase || 'Your custom phrase'}&rdquo;
+              </p>
+            ) : null}
+            <div className="modal-actions">
+              <button
+                className="modal-cancel"
+                type="button"
+                onClick={() => setTrainingSession(null)}
+              >
+                Hide
+              </button>
+              {trainingSession.progress >= 100 ? (
+                <button
+                  className="primary-btn"
+                  type="button"
+                  onClick={() => setTrainingSession(null)}
+                >
+                  Finish
+                </button>
+              ) : (
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={() =>
+                    setTrainingSession((prev) => (prev ? { ...prev, progress: 100 } : prev))
+                  }
+                >
+                  Skip to Complete
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {editingGesture ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setEditingGesture(null)}>
-          <section className="modal-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+          <section
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>Edit Gesture</h3>
             <label className="form-field">
               <span>Name</span>
               <input
                 value={editingGesture.title}
                 onChange={(event) =>
-                  setEditingGesture((prev) => (prev ? { ...prev, title: event.target.value } : prev))
+                  setEditingGesture((prev) =>
+                    prev ? { ...prev, title: event.target.value } : prev
+                  )
                 }
               />
             </label>
@@ -954,12 +1750,18 @@ function App() {
               <input
                 value={editingGesture.subtitle}
                 onChange={(event) =>
-                  setEditingGesture((prev) => (prev ? { ...prev, subtitle: event.target.value } : prev))
+                  setEditingGesture((prev) =>
+                    prev ? { ...prev, subtitle: event.target.value } : prev
+                  )
                 }
               />
             </label>
             <div className="modal-actions">
-              <button className="modal-cancel" type="button" onClick={() => setEditingGesture(null)}>
+              <button
+                className="modal-cancel"
+                type="button"
+                onClick={() => setEditingGesture(null)}
+              >
                 Cancel
               </button>
               <button className="primary-btn" type="button" onClick={handleEditSave}>
@@ -971,14 +1773,27 @@ function App() {
       ) : null}
 
       {pendingDeleteGesture ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setPendingDeleteGesture(null)}>
-          <section className="modal-card modal-card-compact" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingDeleteGesture(null)}
+        >
+          <section
+            className="modal-card modal-card-compact"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>Delete Gesture?</h3>
             <p>
               This will remove <strong>{pendingDeleteGesture.title}</strong>.
             </p>
             <div className="modal-actions">
-              <button className="modal-cancel" type="button" onClick={() => setPendingDeleteGesture(null)}>
+              <button
+                className="modal-cancel"
+                type="button"
+                onClick={() => setPendingDeleteGesture(null)}
+              >
                 Cancel
               </button>
               <button
@@ -994,19 +1809,34 @@ function App() {
       ) : null}
 
       {showResetConfirm ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setShowResetConfirm(false)}>
-          <section className="modal-card modal-card-compact" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setShowResetConfirm(false)}
+        >
+          <section
+            className="modal-card modal-card-compact"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>Reset Gestures</h3>
             <p>Restore the default gesture set and remove custom edits?</p>
             <div className="modal-actions">
-              <button className="modal-cancel" type="button" onClick={() => setShowResetConfirm(false)}>
+              <button
+                className="modal-cancel"
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+              >
                 Cancel
               </button>
               <button
                 className="secondary-btn"
                 type="button"
                 onClick={() => {
-                  setGestures(INITIAL_GESTURES)
+                  setGestures(cloneDefaultGestures())
+                  setSelectedGesture(null)
+                  setEditingGesture(null)
                   setShowResetConfirm(false)
                   void notifyUser('Gestures reset', 'Default gesture set has been restored.')
                 }}

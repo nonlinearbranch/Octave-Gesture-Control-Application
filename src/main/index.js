@@ -1,10 +1,11 @@
 import { app, shell, BrowserWindow, session, ipcMain, Notification } from 'electron'
 import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+const isDev = !app.isPackaged
+
 function loadRendererWindow(window) {
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     window.loadFile(join(__dirname, '../renderer/index.html'))
@@ -74,20 +75,32 @@ app.whenReady().then(() => {
 
   ipcMain.handle('app:notify', (_, payload = {}) => {
     if (!Notification.isSupported()) return false
-    const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Octave'
+    const title =
+      typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Octave'
     const body = typeof payload.body === 'string' ? payload.body : ''
     new Notification({ title, body, silent: true }).show()
     return true
   })
 
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.octave.app')
+  }
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    window.webContents.on('before-input-event', (event, input) => {
+      if (isDev && input.type === 'keyDown' && input.key === 'F12') {
+        window.webContents.toggleDevTools()
+        event.preventDefault()
+      }
+
+      const isReload =
+        input.type === 'keyDown' &&
+        (input.control || input.meta) &&
+        input.key?.toLowerCase() === 'r'
+      if (!isDev && isReload) {
+        event.preventDefault()
+      }
+    })
   })
 
   createWindow()
