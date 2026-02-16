@@ -232,6 +232,12 @@ const VOICE_TRAINING_CUES = [
   'Add one sample with mild background noise.'
 ]
 
+const getCueIndexFromProgress = (type, progress) => {
+  const cueList = type === 'voice' ? VOICE_TRAINING_CUES : HAND_TRAINING_CUES
+  const normalized = Math.max(0, Math.min(100, Number(progress) || 0))
+  return Math.min(cueList.length - 1, Math.floor((normalized / 100) * cueList.length))
+}
+
 const cloneDefaultGestures = () =>
   DEFAULT_GESTURES.map((gesture) => ({
     ...gesture,
@@ -240,6 +246,92 @@ const cloneDefaultGestures = () =>
   }))
 
 const DEFAULT_LIBRARY_VISIBLE = 8
+
+const ADD_GESTURE_SECTIONS = [
+  {
+    id: 'dynamic',
+    label: 'Dynamic Controls',
+    help: 'Use this when you want smooth, continuous control while gesture is active.',
+    items: [
+      {
+        id: 'custom-dynamic-hand',
+        title: 'Dynamic Hand Control',
+        subtitle: 'Continuous control (magnitude, cursor, drag, dial, scroll).',
+        fromUserView: 'I want to control something continuously with my hand movement.',
+        example: 'Volume up/down by moving an open palm',
+        type: 'hand',
+        controlModel: 'dynamic',
+        family: 'Dynamic Gesture Family',
+        templateTitle: 'New Dynamic Gesture',
+        templateSubtitle: 'Continuous control mapping'
+      },
+      {
+        id: 'custom-dynamic-voice',
+        title: 'Dynamic Voice Control',
+        subtitle: 'Continuous voice-driven control profile.',
+        fromUserView: 'I want voice-driven continuous control instead of hand movement.',
+        example: 'Progressive zoom control from voice cues',
+        type: 'voice',
+        controlModel: 'dynamic',
+        family: 'Dynamic Voice Family',
+        templateTitle: 'New Dynamic Voice Gesture',
+        templateSubtitle: 'Continuous voice control mapping',
+        phrase: 'Your dynamic command'
+      }
+    ]
+  },
+  {
+    id: 'static',
+    label: 'Static Commands',
+    help: 'Use this when one gesture/phrase should trigger one single action.',
+    items: [
+      {
+        id: 'custom-static-hand',
+        title: 'Static Hand Command',
+        subtitle: 'One-time hand trigger action.',
+        fromUserView: 'I want one hand sign to trigger one action.',
+        example: 'Closed fist to Play/Pause',
+        type: 'hand',
+        controlModel: 'static',
+        family: 'Static Command Family',
+        templateTitle: 'New Static Gesture',
+        templateSubtitle: 'One-time hand action mapping'
+      },
+      {
+        id: 'custom-static-voice',
+        title: 'Static Voice Command',
+        subtitle: 'One-time voice trigger phrase.',
+        fromUserView: 'I want one voice phrase to trigger one action.',
+        example: 'Say "next tab" to switch tab',
+        type: 'voice',
+        controlModel: 'static',
+        family: 'Static Command Voice Family',
+        templateTitle: 'New Voice Command',
+        templateSubtitle: 'One-time voice action mapping',
+        phrase: 'Your command phrase'
+      }
+    ]
+  },
+  {
+    id: 'power',
+    label: 'Power Command',
+    help: 'Use this for a high-impact shortcut that launches a workflow.',
+    items: [
+      {
+        id: 'custom-power-automation',
+        title: 'Power Automation',
+        subtitle: 'High-impact custom workflow trigger.',
+        fromUserView: 'I want one custom gesture to run a powerful shortcut.',
+        example: 'DRS frame gesture to launch VS Code',
+        type: 'hand',
+        controlModel: 'static',
+        family: 'Power Command Gesture',
+        templateTitle: 'New Power Command',
+        templateSubtitle: 'Automation trigger mapping'
+      }
+    ]
+  }
+]
 
 const DEFAULT_SETTINGS = {
   selectedCameraId: '',
@@ -396,7 +488,7 @@ function App() {
   const [editingGesture, setEditingGesture] = useState(null)
   const [showAddTypePopup, setShowAddTypePopup] = useState(false)
   const [showPermissionPopup, setShowPermissionPopup] = useState(false)
-  const [pendingGestureType, setPendingGestureType] = useState(null)
+  const [pendingGesturePreset, setPendingGesturePreset] = useState(null)
   const [pendingDeleteGesture, setPendingDeleteGesture] = useState(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [trainingSession, setTrainingSession] = useState(null)
@@ -586,6 +678,7 @@ function App() {
   }, [tab, settings.selectedCameraId])
 
   useEffect(() => {
+    let audioContext = null
     const startMicLevel = async () => {
       if (tab !== 'live-monitoring' || !settings.selectedMicId) return
       try {
@@ -596,9 +689,13 @@ function App() {
           audio: { deviceId: { exact: settings.selectedMicId } }
         })
         micStreamRef.current = stream
-        const ctx = new AudioContext()
-        const source = ctx.createMediaStreamSource(stream)
-        const analyser = ctx.createAnalyser()
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext
+        if (!AudioContextClass) {
+          throw new Error('AudioContext is not supported on this device.')
+        }
+        audioContext = new AudioContextClass()
+        const source = audioContext.createMediaStreamSource(stream)
+        const analyser = audioContext.createAnalyser()
         analyser.fftSize = 256
         source.connect(analyser)
         const data = new Uint8Array(analyser.frequencyBinCount)
@@ -623,6 +720,9 @@ function App() {
       micFrameRef.current = null
       micStreamRef.current?.getTracks().forEach((t) => t.stop())
       micStreamRef.current = null
+      if (audioContext) {
+        void audioContext.close().catch(() => {})
+      }
       setMicLevel(0)
     }
   }, [tab, settings.selectedMicId])
@@ -674,18 +774,49 @@ function App() {
   }, [trainingSession])
 
   useEffect(() => {
+    if (!window.api?.onTrainingProgress) return
+    const unsubscribe = window.api.onTrainingProgress((payload = {}) => {
+      setTrainingSession((prev) => {
+        if (!prev) return prev
+        if (payload.cancelled) return null
+        if (payload.sessionId && prev.sessionId && payload.sessionId !== prev.sessionId) {
+          return prev
+        }
+        if (payload.gestureId && payload.gestureId !== prev.gestureId) {
+          return prev
+        }
+
+        const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
+        return {
+          ...prev,
+          sessionId: payload.sessionId || prev.sessionId || null,
+          source: 'engine',
+          progress: nextProgress,
+          cueIndex: getCueIndexFromProgress(prev.type, nextProgress)
+        }
+      })
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (!trainingSession || trainingSession.progress >= 100) return
+    if (trainingSession.source !== 'ui-fallback') return
     const timer = setTimeout(() => {
       setTrainingSession((prev) => {
-        if (!prev || prev.progress >= 100) return prev
+        if (!prev || prev.progress >= 100 || prev.source !== 'ui-fallback') return prev
         const step = prev.type === 'voice' ? 9 : 7
         const nextProgress = Math.min(100, prev.progress + step)
-        const cueList = prev.type === 'voice' ? VOICE_TRAINING_CUES : HAND_TRAINING_CUES
-        const cueIndex = Math.min(
-          cueList.length - 1,
-          Math.floor((nextProgress / 100) * cueList.length)
-        )
-        return { ...prev, progress: nextProgress, cueIndex }
+        return {
+          ...prev,
+          progress: nextProgress,
+          cueIndex: getCueIndexFromProgress(prev.type, nextProgress)
+        }
       })
     }, 280)
 
@@ -775,63 +906,107 @@ function App() {
     )
   }
 
-  const createGesture = (type) => {
-    const id = `${type}-${Date.now()}`
-    const created =
-      type === 'voice'
-        ? {
-            id,
-            title: 'New Voice Gesture',
-            subtitle: 'Custom voice action mapping',
-            type: 'voice',
-            enabled: true,
-            locked: false,
-            phrase: 'Your custom phrase'
-          }
-        : {
-            id,
-            title: 'New Hand Gesture',
-            subtitle: 'Custom hand sign mapping',
-            type: 'hand',
-            enabled: true,
-            locked: false
-          }
+  const createGesture = (preset) => {
+    if (!preset) return null
+    const id = `${preset.id}-${Date.now()}`
+    const created = {
+      id,
+      title: preset.templateTitle || 'New Gesture',
+      subtitle: preset.templateSubtitle || 'Custom gesture mapping',
+      type: preset.type || 'hand',
+      controlModel: preset.controlModel || 'static',
+      family: preset.family || 'Custom Feature',
+      enabled: true,
+      locked: false,
+      ...(preset.type === 'voice' ? { phrase: preset.phrase || 'Your custom phrase' } : {})
+    }
     setGestures((prev) => [created, ...prev])
     void notifyUser('Gesture added', `${created.title} is ready to configure.`)
     return created
   }
 
-  const startTrainingSession = (gesture) => {
+  const startTrainingSession = async (gesture, returnTab = null) => {
     if (!gesture) return
     setTrainingSession({
       gestureId: gesture.id,
       type: gesture.type,
       progress: 0,
-      cueIndex: 0
+      cueIndex: 0,
+      sessionId: null,
+      source: 'pending',
+      returnTab
     })
+
+    if (!window.api?.startTraining) {
+      setTrainingSession((prev) => (prev ? { ...prev, source: 'ui-fallback' } : prev))
+      return
+    }
+
+    try {
+      const result = await window.api.startTraining({
+        gestureId: gesture.id,
+        type: gesture.type
+      })
+      if (result?.ok) {
+        setTrainingSession((prev) =>
+          prev && prev.gestureId === gesture.id
+            ? { ...prev, sessionId: result.sessionId || null, source: 'engine' }
+            : prev
+        )
+        return
+      }
+    } catch {
+      // fall through to ui fallback mode
+    }
+
+    setTrainingSession((prev) => (prev ? { ...prev, source: 'ui-fallback' } : prev))
   }
 
-  const handleAddGestureType = (type) => {
-    setPendingGestureType(type)
+  const handleAddGestureType = (preset) => {
+    setPendingGesturePreset(preset)
     setShowAddTypePopup(false)
     setShowPermissionPopup(true)
   }
 
   const handleConfirmGestureCreation = async () => {
-    if (!pendingGestureType) return
-    const type = pendingGestureType
-    const granted = await requestDeviceAccess(type === 'voice' ? 'audio' : 'video')
+    if (!pendingGesturePreset) return
+    const preset = pendingGesturePreset
+    const type = preset.type
+    const granted = await requestDeviceAccess(type === 'voice' ? 'both' : 'video')
     if (!granted) {
       setShowPermissionPopup(false)
-      setPendingGestureType(null)
+      setPendingGesturePreset(null)
       return
     }
-    const created = createGesture(type)
-    startTrainingSession(created)
+    const returnTab = settings.openMonitoringAfterAdd ? null : tab
+    const created = createGesture(preset)
+    setTab('live-monitoring')
+    await startTrainingSession(created, returnTab)
     setShowPermissionPopup(false)
-    setPendingGestureType(null)
-    if (settings.openMonitoringAfterAdd) {
-      setTab('live-monitoring')
+    setPendingGesturePreset(null)
+  }
+
+  const finishTrainingSession = () => {
+    const nextTab = trainingSession?.returnTab || null
+    setTrainingSession(null)
+    if (nextTab) {
+      setTab(nextTab)
+    }
+  }
+
+  const stopTrainingSession = async () => {
+    const currentSession = trainingSession
+    if (!currentSession) return
+    if (currentSession.progress < 100 && window.api?.cancelTraining) {
+      try {
+        await window.api.cancelTraining()
+      } catch {
+        // ignore cancellation errors and close local state anyway
+      }
+    }
+    setTrainingSession(null)
+    if (currentSession.returnTab) {
+      setTab(currentSession.returnTab)
     }
   }
 
@@ -944,7 +1119,7 @@ function App() {
         <div className={`guide-scene scene-${scene}`} aria-hidden>
           <div className="guide-stage guide-stage-third-umpire">
             <div className="review-hands">
-              {renderHand('left-open')}
+              {renderHand('open')}
               <span className="review-bar" />
               {renderHand('right-open')}
             </div>
@@ -959,17 +1134,23 @@ function App() {
     const handVariant =
       scene === 'scroll-control'
         ? 'two-finger'
-        : scene === 'mode-switch-cycle'
-          ? 'three-finger'
-          : scene === 'fist-play-pause'
-            ? 'fist'
-            : scene === 'thumbs-up-mute'
-              ? 'thumbs-up'
-              : scene === 'v-sign-next-prev'
-                ? 'two-finger'
-                : scene === 'ok-sign-confirm'
-                  ? 'ok-sign'
-                  : 'open'
+        : scene === 'cursor-control' || scene === 'navigation-control'
+          ? 'index-point'
+          : scene === 'grab-drag'
+            ? 'pinch-grab'
+            : scene === 'rotation-dial'
+              ? 'curved'
+              : scene === 'mode-switch-cycle'
+                ? 'three-finger'
+                : scene === 'fist-play-pause'
+                  ? 'fist'
+                  : scene === 'thumbs-up-mute'
+                    ? 'thumbs-up'
+                    : scene === 'v-sign-next-prev'
+                      ? 'two-finger'
+                      : scene === 'ok-sign-confirm'
+                        ? 'ok-sign'
+                        : 'open'
 
     const withTabs = scene === 'navigation-control'
     const withModePanels = scene === 'mode-switch-cycle'
@@ -1022,6 +1203,11 @@ function App() {
     trainingSession?.type === 'voice'
       ? VOICE_TRAINING_CUES[trainingSession.cueIndex] || VOICE_TRAINING_CUES[0]
       : HAND_TRAINING_CUES[trainingSession?.cueIndex] || HAND_TRAINING_CUES[0]
+  const trainingCueList =
+    trainingSession?.type === 'voice' ? VOICE_TRAINING_CUES : HAND_TRAINING_CUES
+  const currentTrainingStep = trainingSession
+    ? Math.min(trainingCueList.length, Math.max(1, trainingSession.cueIndex + 1))
+    : 0
 
   const renderGestureCard = (item) => (
     <article
@@ -1207,6 +1393,10 @@ function App() {
                 className="secondary-btn"
                 type="button"
                 onClick={() => {
+                  if (trainingSession) {
+                    void stopTrainingSession()
+                    return
+                  }
                   setTab('gesture-library')
                 }}
               >
@@ -1274,7 +1464,92 @@ function App() {
               <section className="placeholder-panel">
                 <h3>Camera Input</h3>
                 <p>Status: {cameraStatus}</p>
-                <video ref={videoRef} className="preview-video" autoPlay muted playsInline />
+                <div className="preview-video-wrap">
+                  <video ref={videoRef} className="preview-video" autoPlay muted playsInline />
+                  {trainingSession ? (
+                    <div
+                      className={`training-focus-frame ${trainingSession.type === 'voice' ? 'voice' : 'hand'}`}
+                      aria-hidden
+                    >
+                      <span className="focus-corner tl" />
+                      <span className="focus-corner tr" />
+                      <span className="focus-corner bl" />
+                      <span className="focus-corner br" />
+                      <span className="focus-center-dot" />
+                      <span className="focus-hint">
+                        {trainingSession.type === 'voice'
+                          ? 'Speak clearly while keeping your face in frame'
+                          : 'Keep your hand inside this guide area'}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+                {trainingSession ? (
+                  <div className="training-video-overlay">
+                    <div className="training-video-topline">
+                      <span className="training-stage-chip">{trainingStageMeta?.label}</span>
+                      <span className="training-step-chip">
+                        Step {currentTrainingStep}/{trainingCueList.length}
+                      </span>
+                    </div>
+                    <div className="training-video-head">
+                      <strong>{activeTrainingGesture?.title || 'Training Gesture'}</strong>
+                      <span>{trainingSession.progress}%</span>
+                    </div>
+                    <div className="training-progress training-progress--overlay">
+                      <div style={{ width: `${trainingSession.progress}%` }} />
+                    </div>
+                    <p className="training-video-stage">{trainingStageMeta?.detail}</p>
+                    <p className="training-video-cue">{activeTrainingCue}</p>
+                    <ul className="training-cue-list">
+                      {trainingCueList.map((cue, index) => (
+                        <li
+                          key={`${trainingSession.type}-${index}`}
+                          className={
+                            index < trainingSession.cueIndex
+                              ? 'done'
+                              : index === trainingSession.cueIndex
+                                ? 'current'
+                                : ''
+                          }
+                        >
+                          <span className="cue-index">{index + 1}</span>
+                          <span>{cue}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {trainingSession.source === 'pending' ? (
+                      <p className="training-video-status">Connecting to training engine...</p>
+                    ) : null}
+                    {trainingSession.type === 'voice' ? (
+                      <p className="training-video-phrase">
+                        Phrase: &ldquo;{activeTrainingGesture?.phrase || 'Your custom phrase'}
+                        &rdquo;
+                      </p>
+                    ) : null}
+                    <div className="training-video-actions">
+                      {trainingSession.progress >= 100 ? (
+                        <button
+                          className="primary-btn training-overlay-btn"
+                          type="button"
+                          onClick={finishTrainingSession}
+                        >
+                          Finish
+                        </button>
+                      ) : (
+                        <button
+                          className="modal-cancel training-overlay-btn"
+                          type="button"
+                          onClick={() => {
+                            void stopTrainingSession()
+                          }}
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </section>
               <section className="placeholder-panel">
                 <h3>Microphone Input</h3>
@@ -1284,20 +1559,6 @@ function App() {
                 </div>
                 <p>Input Level: {micLevel}%</p>
               </section>
-              {trainingSession ? (
-                <section className="placeholder-panel training-inline">
-                  <h3>Training Progress</h3>
-                  <p>
-                    {activeTrainingGesture?.title || 'Custom Gesture'} - {trainingSession.progress}%
-                  </p>
-                  <div className="training-progress">
-                    <div style={{ width: `${trainingSession.progress}%` }} />
-                  </div>
-                  <small>
-                    {trainingStageMeta?.label}: {trainingStageMeta?.detail}
-                  </small>
-                </section>
-              ) : null}
               {!mediaReady || mediaError ? (
                 <section className="placeholder-panel monitor-alert">
                   <h3>Device Access</h3>
@@ -1469,7 +1730,7 @@ function App() {
                           }))
                         }
                       />
-                      Open Live Monitoring after adding gesture
+                      Keep Live Monitoring open after training starts
                     </label>
                     <label>
                       <input
@@ -1504,30 +1765,43 @@ function App() {
           onClick={() => setShowAddTypePopup(false)}
         >
           <section
-            className="modal-card modal-card-compact"
+            className="modal-card modal-card-wide"
             role="dialog"
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Add Gesture</h3>
-            <p>Choose input mode</p>
-            <div className="type-grid">
-              <button
-                className="type-card"
-                type="button"
-                onClick={() => handleAddGestureType('hand')}
-              >
-                <strong>Hand Gesture</strong>
-                <small>Webcam landmarks</small>
-              </button>
-              <button
-                className="type-card"
-                type="button"
-                onClick={() => handleAddGestureType('voice')}
-              >
-                <strong>Voice Gesture</strong>
-                <small>Mic trigger phrase</small>
-              </button>
+            <p className="add-intro">
+              Choose what you want to control. Octave will create a starter gesture that you can
+              edit later.
+            </p>
+            <div className="add-guide">
+              <h4>What happens next</h4>
+              <p>1) Pick a template 2) Allow camera/microphone access 3) Quick training starts.</p>
+              <small>You can rename, remap, or delete it anytime.</small>
+            </div>
+            <div className="add-sections">
+              {ADD_GESTURE_SECTIONS.map((section) => (
+                <div key={section.id} className="add-section">
+                  <h4>{section.label}</h4>
+                  <p className="add-section-help">{section.help}</p>
+                  <div className="type-grid">
+                    {section.items.map((item) => (
+                      <button
+                        key={item.id}
+                        className="type-card"
+                        type="button"
+                        onClick={() => handleAddGestureType(item)}
+                      >
+                        <strong>{item.title}</strong>
+                        <small>{item.subtitle}</small>
+                        <p className="type-card-user-view">{item.fromUserView}</p>
+                        <span className="type-card-example">Example: {item.example}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
             <button
               className="modal-cancel"
@@ -1546,7 +1820,7 @@ function App() {
           role="presentation"
           onClick={() => {
             setShowPermissionPopup(false)
-            setPendingGestureType(null)
+            setPendingGesturePreset(null)
           }}
         >
           <section
@@ -1557,8 +1831,10 @@ function App() {
           >
             <h3>Allow Device Access</h3>
             <p>
-              Octave needs {pendingGestureType === 'voice' ? 'microphone' : 'camera'} access to
-              start {pendingGestureType === 'voice' ? 'voice' : 'hand'} gesture setup.
+              Octave needs{' '}
+              {pendingGesturePreset?.type === 'voice' ? 'camera and microphone' : 'camera'} access
+              to start {pendingGesturePreset?.type === 'voice' ? 'voice' : 'hand'} gesture setup in
+              Live Monitoring.
             </p>
             <div className="modal-actions">
               <button
@@ -1566,7 +1842,7 @@ function App() {
                 type="button"
                 onClick={() => {
                   setShowPermissionPopup(false)
-                  setPendingGestureType(null)
+                  setPendingGesturePreset(null)
                 }}
               >
                 Not now
@@ -1655,72 +1931,6 @@ function App() {
             <button className="modal-cancel" type="button" onClick={() => setSelectedGesture(null)}>
               Close
             </button>
-          </section>
-        </div>
-      ) : null}
-
-      {trainingSession ? (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setTrainingSession(null)}
-        >
-          <section
-            className="modal-card modal-card-training"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>
-              {trainingSession.type === 'voice'
-                ? 'Voice Command Training'
-                : 'Hand Gesture Training'}
-            </h3>
-            <p>
-              Training profile: <strong>{activeTrainingGesture?.title || 'Custom Gesture'}</strong>
-            </p>
-            <div className="training-progress">
-              <div style={{ width: `${trainingSession.progress}%` }} />
-            </div>
-            <div className="training-meta">
-              <span>{trainingSession.progress}%</span>
-              <span>{trainingStageMeta?.label}</span>
-            </div>
-            <p className="training-stage-detail">{trainingStageMeta?.detail}</p>
-            <p className="training-cue">{activeTrainingCue}</p>
-            {trainingSession.type === 'voice' ? (
-              <p className="guide-phrase">
-                Prompt phrase: &ldquo;{activeTrainingGesture?.phrase || 'Your custom phrase'}&rdquo;
-              </p>
-            ) : null}
-            <div className="modal-actions">
-              <button
-                className="modal-cancel"
-                type="button"
-                onClick={() => setTrainingSession(null)}
-              >
-                Hide
-              </button>
-              {trainingSession.progress >= 100 ? (
-                <button
-                  className="primary-btn"
-                  type="button"
-                  onClick={() => setTrainingSession(null)}
-                >
-                  Finish
-                </button>
-              ) : (
-                <button
-                  className="secondary-btn"
-                  type="button"
-                  onClick={() =>
-                    setTrainingSession((prev) => (prev ? { ...prev, progress: 100 } : prev))
-                  }
-                >
-                  Skip to Complete
-                </button>
-              )}
-            </div>
           </section>
         </div>
       ) : null}

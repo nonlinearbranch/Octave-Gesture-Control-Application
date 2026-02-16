@@ -3,6 +3,20 @@ import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 
 const isDev = !app.isPackaged
+const trainingJobs = new Map()
+
+const stopTrainingJob = (webContentsId) => {
+  const job = trainingJobs.get(webContentsId)
+  if (!job) return null
+  clearInterval(job.timer)
+  trainingJobs.delete(webContentsId)
+  return job
+}
+
+const sendTrainingProgress = (webContents, payload) => {
+  if (!webContents || webContents.isDestroyed()) return
+  webContents.send('training:progress', payload)
+}
 
 function loadRendererWindow(window) {
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
@@ -82,6 +96,83 @@ app.whenReady().then(() => {
     return true
   })
 
+  ipcMain.handle('training:start', (event, payload = {}) => {
+    const webContents = event.sender
+    const webContentsId = webContents.id
+    stopTrainingJob(webContentsId)
+
+    const type = payload?.type === 'voice' ? 'voice' : 'hand'
+    const gestureId =
+      typeof payload?.gestureId === 'string' && payload.gestureId.trim()
+        ? payload.gestureId.trim()
+        : `gesture-${Date.now()}`
+    const sessionId = `${webContentsId}-${Date.now()}`
+    const step = type === 'voice' ? 9 : 7
+    let progress = 0
+
+    sendTrainingProgress(webContents, {
+      sessionId,
+      gestureId,
+      type,
+      progress,
+      done: false
+    })
+
+    const timer = setInterval(() => {
+      const jitter = Math.floor(Math.random() * 3)
+      progress = Math.min(100, progress + step + jitter)
+      const done = progress >= 100
+
+      sendTrainingProgress(webContents, {
+        sessionId,
+        gestureId,
+        type,
+        progress,
+        done
+      })
+
+      if (done) {
+        stopTrainingJob(webContentsId)
+      }
+    }, 320)
+
+    trainingJobs.set(webContentsId, { timer, sessionId, gestureId, type })
+    return { ok: true, sessionId, gestureId, type }
+  })
+
+  ipcMain.handle('training:complete', (event) => {
+    const webContents = event.sender
+    const webContentsId = webContents.id
+    const job = stopTrainingJob(webContentsId)
+    if (!job) return { ok: false, reason: 'no_active_session' }
+
+    sendTrainingProgress(webContents, {
+      sessionId: job.sessionId,
+      gestureId: job.gestureId,
+      type: job.type,
+      progress: 100,
+      done: true
+    })
+    return { ok: true, sessionId: job.sessionId }
+  })
+
+  ipcMain.handle('training:cancel', (event) => {
+    const webContents = event.sender
+    const webContentsId = webContents.id
+    const job = stopTrainingJob(webContentsId)
+    if (!job) return { ok: false, reason: 'no_active_session' }
+
+    sendTrainingProgress(webContents, {
+      sessionId: job.sessionId,
+      gestureId: job.gestureId,
+      type: job.type,
+      progress: 0,
+      done: false,
+      cancelled: true
+    })
+    return { ok: true, sessionId: job.sessionId }
+  })
+
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.octave.app')
   }
@@ -104,6 +195,12 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+
+  app.on('web-contents-created', (_, webContents) => {
+    webContents.on('destroyed', () => {
+      stopTrainingJob(webContents.id)
+    })
+  })
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
