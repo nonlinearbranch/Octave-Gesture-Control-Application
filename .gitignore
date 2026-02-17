@@ -1,0 +1,43 @@
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===== Virtual Environments =====
+venv/
+.env/
+.env.bak/
+
+# ===== MediaPipe / Tensorflow cache =====
+*.tflite
+*.pb
+*.h5
+*.ckpt
+.cache/
+
+# ===== ML generated =====
+ml_engine/data/models/
+ml_engine/data/*.csv
+
+# (keep label_map.json tracked)
+!ml_engine/data/label_map.json
+
+# ===== Logs =====
+*.log
+
+# ===== OS junk =====
+.DS_Store
+Thumbs.db
+
+# ===== VS Code =====
+.vscode/
+
+# ===== Electron / Node (future UI) =====
+node_modules/
+dist/
+out/
+
+# ===== Screenshots / temp =====
+screenshots/
+temp/
