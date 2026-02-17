@@ -1,8 +1,8 @@
 import math
 import time
+from utils.helpers import get_setting
 
 last_valid_time = 0
-hold_time = 0.5
 
 
 def palm_normal(hand):
@@ -40,6 +40,7 @@ def angle_between(a, b):
 
 def detect_drs(hand1, hand2):
     global last_valid_time
+    hold_time = float(get_setting("drs_hold_time_sec", 0.5))
 
     n1 = palm_normal(hand1)
     n2 = palm_normal(hand2)

@@ -3,33 +3,66 @@ import mediapipe as mp
 import threading
 import json
 import time
+import os
 
 from ml_engine.feature_extraction import extract_features
 from ml_engine.static_runtime import init_static_model, run_static_inference
 
 from intent_engine.intent_resolver import resolve_intent
+from intent_engine.intent_resolver import execute_custom_action
 from intent_engine.mode_manager import get_mode
 from intent_engine.stability_filter import stable_gesture
 
 from dynamic_engine.drs_gesture import detect_drs
+from dynamic_engine.family_detector import DynamicFamilyDetector
 
 from screen_engine.screen_capture import capture_resized
 from screen_engine.semantic_extractor import extract_semantic_features
-from intent_engine.context_engine.intent_adapter import get_active_intent, set_override
+from intent_engine.context_engine.intent_adapter import get_active_intent, cycle_override
+from utils.helpers import get_setting, write_runtime_state, append_engine_event
+from api_engine.command_bridge import CommandBridge
+from voice_engine.vosk_listener import VoskVoiceListener
 
 running = True
 
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=2)
+hands = mp_hands.Hands(
+    max_num_hands=int(get_setting("max_hands", 2)),
+    model_complexity=int(get_setting("hand_model_complexity", 0)),
+    min_detection_confidence=float(get_setting("hand_min_detection_confidence", 0.6)),
+    min_tracking_confidence=float(get_setting("hand_min_tracking_confidence", 0.55))
+)
 draw = mp.solutions.drawing_utils
+family_detector = DynamicFamilyDetector()
+draw_landmarks = bool(get_setting("draw_landmarks", True))
+command_bridge = CommandBridge()
 
 last_semantic = None
 last_time = 0
-SEMANTIC_INTERVAL = 0.40
+SEMANTIC_INTERVAL = float(get_setting("semantic_interval_sec", 0.4))
+STATE_INTERVAL = float(get_setting("runtime_state_interval_sec", 0.2))
+COMMAND_INTERVAL = float(get_setting("command_poll_interval_sec", 0.25))
 
 
-with open("ml_engine/data/label_map.json", "r") as f:
-    label_map = json.load(f)
+base_dir = os.path.dirname(os.path.abspath(__file__))
+label_map_path = os.path.join(base_dir, "ml_engine", "data", "label_map.json")
+model_path = os.path.join(base_dir, "ml_engine", "data", "models", "static_model.pth")
+vosk_model_path = os.path.join(base_dir, "ml_engine", "data", str(get_setting("voice_model_dir", "vosk-model-small-en-us-0.15")))
+MODEL_RELOAD_INTERVAL = float(get_setting("model_reload_interval_sec", 2.0))
+
+label_map = {}
+
+
+def load_label_map():
+    global label_map
+    try:
+        with open(label_map_path, "r", encoding="utf-8") as f:
+            label_map = json.load(f)
+    except Exception:
+        label_map = {}
+
+
+load_label_map()
 
 
 def get_gesture_name(gesture_id):
@@ -39,14 +72,63 @@ def get_gesture_name(gesture_id):
 def detection_loop():
     global running, last_semantic, last_time
 
-    cap = cv2.VideoCapture(0)
+    cv2.setUseOptimized(True)
+    cap = cv2.VideoCapture(int(get_setting("camera_index", 0)))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(get_setting("camera_width", 960)))
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(get_setting("camera_height", 540)))
 
     last_family = None
+    last_intent = None
+    last_conf = 0.0
+    last_static = None
+    last_voice_phrase = None
+    last_state_write = 0.0
+    prev_t = time.time()
+    fps = 0.0
+    last_reload_check = 0.0
+    last_command_poll = 0.0
+    last_label_mtime = os.path.getmtime(label_map_path) if os.path.exists(label_map_path) else 0.0
+    last_model_mtime = os.path.getmtime(model_path) if os.path.exists(model_path) else 0.0
+    voice_listener = VoskVoiceListener(vosk_model_path)
+    voice_listener.start()
+    append_engine_event("engine_started", {"voice_model_path": vosk_model_path})
 
     while running:
         ret, frame = cap.read()
         if not ret:
             continue
+
+        now_t = time.time()
+        dt = max(1e-6, now_t - prev_t)
+        prev_t = now_t
+        fps = 0.88 * fps + 0.12 * (1.0 / dt)
+
+        if now_t - last_reload_check >= MODEL_RELOAD_INTERVAL:
+            current_label_mtime = os.path.getmtime(label_map_path) if os.path.exists(label_map_path) else 0.0
+            current_model_mtime = os.path.getmtime(model_path) if os.path.exists(model_path) else 0.0
+            if current_label_mtime != last_label_mtime:
+                load_label_map()
+                last_label_mtime = current_label_mtime
+            if current_model_mtime != last_model_mtime and label_map:
+                try:
+                    init_static_model(model_path, 63, len(label_map))
+                    last_model_mtime = current_model_mtime
+                except Exception:
+                    pass
+            last_reload_check = now_t
+
+        if now_t - last_command_poll >= COMMAND_INTERVAL:
+            command_bridge.poll_once()
+            last_command_poll = now_t
+
+        voice_event = voice_listener.poll_event()
+        if voice_event:
+            executed = execute_custom_action(voice_event.get("action"))
+            last_voice_phrase = voice_event.get("phrase")
+            append_engine_event("voice_action", {
+                "phrase": voice_event.get("phrase"),
+                "executed": bool(executed)
+            })
 
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -64,17 +146,17 @@ def detection_loop():
         semantic_features = last_semantic
 
         gesture_name = None
+        family = None
+        intent = None
+        confidence = 0.0
 
         if result.multi_hand_landmarks:
-
             hands_list = result.multi_hand_landmarks
 
-            # -------- DRS POWER GESTURE --------
             if len(hands_list) == 2:
                 if detect_drs(hands_list[0], hands_list[1]):
-                    resolve_intent(None, "DRS T-Frame")
+                    resolve_intent(None, gesture_name="DRS T-Frame")
 
-            # -------- STATIC ML --------
             hand = hands_list[0]
 
             features = extract_features(hand)
@@ -84,30 +166,45 @@ def detection_loop():
                 raw = get_gesture_name(gesture_id)
                 gesture_name = stable_gesture(raw)
 
-            # -------- MANUAL OVERRIDE --------
-            if gesture_name == "Three Fingers" and last_family:
-                next_map = {
-                    "Volume": "Brightness",
-                    "Brightness": "Zoom",
-                    "Zoom": "ScrollSpeed",
-                    "ScrollSpeed": "PlaybackSpeed",
-                    "PlaybackSpeed": "Volume"
-                }
-                set_override(next_map[last_family])
+            family = family_detector.detect(hand)
+            if family:
+                intent, confidence = get_active_intent(family, semantic_features)
 
-            # -------- DYNAMIC FAMILY DETECTION (TEMP FIX) --------
-            # TODO: later replace with real family detection logic
-            last_family = "MAGNITUDE"
-
-            # -------- CONTEXTUAL INTENT --------
-            intent, confidence = get_active_intent(last_family, semantic_features)
+            if gesture_name == "Three Fingers" and family:
+                cycle_override(family, intent)
+                intent, confidence = get_active_intent(family, semantic_features)
 
             if intent:
                 print("Intent:", intent, "Conf:", round(confidence, 2))
-                resolve_intent(hand, intent)
+                resolve_intent(hand, gesture_name=gesture_name, family=family, intent=intent)
+            else:
+                resolve_intent(hand, gesture_name=gesture_name)
 
-            for h in hands_list:
-                draw.draw_landmarks(frame, h, mp_hands.HAND_CONNECTIONS)
+            if draw_landmarks:
+                for h in hands_list:
+                    draw.draw_landmarks(frame, h, mp_hands.HAND_CONNECTIONS)
+
+        if family:
+            last_family = family
+        if intent:
+            last_intent = intent
+            last_conf = confidence
+        if gesture_name:
+            last_static = gesture_name
+
+        if now_t - last_state_write >= STATE_INTERVAL:
+            write_runtime_state({
+                "dynamic_family": last_family,
+                "dynamic_intent": last_intent,
+                "confidence": round(float(last_conf), 4),
+                "static_gesture": last_static,
+                "static_label_map": label_map,
+                "voice_phrase": last_voice_phrase,
+                "mode": get_mode(),
+                "fps": round(float(fps), 2),
+                "semantic_features": semantic_features or {}
+            })
+            last_state_write = now_t
 
         cv2.putText(
             frame,
@@ -118,6 +215,42 @@ def detection_loop():
             (0, 255, 0),
             2
         )
+        cv2.putText(
+            frame,
+            f"Family: {last_family or '-'}",
+            (20, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 255),
+            2
+        )
+        cv2.putText(
+            frame,
+            f"Intent: {last_intent or '-'} ({round(last_conf, 2)})",
+            (20, 115),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 220, 0),
+            2
+        )
+        cv2.putText(
+            frame,
+            f"Static: {last_static or '-'}",
+            (20, 148),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 180, 255),
+            2
+        )
+        cv2.putText(
+            frame,
+            f"FPS: {int(fps)}",
+            (20, 180),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (160, 255, 160),
+            2
+        )
 
         cv2.imshow("Gesture System", frame)
 
@@ -125,15 +258,14 @@ def detection_loop():
             running = False
 
     cap.release()
+    voice_listener.stop()
+    append_engine_event("engine_stopped", {})
     cv2.destroyAllWindows()
 
 
 def main():
-    init_static_model(
-        "ml_engine/data/models/static_model.pth",
-        63,
-        len(label_map)
-    )
+    if label_map:
+        init_static_model(model_path, 63, len(label_map))
 
     t = threading.Thread(target=detection_loop)
     t.start()

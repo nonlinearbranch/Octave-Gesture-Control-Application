@@ -1,0 +1,50 @@
+{
+  "semantic_interval_sec": 0.4,
+  "runtime_state_interval_sec": 0.2,
+  "command_poll_interval_sec": 0.25,
+  "model_reload_interval_sec": 2.0,
+  "max_hands": 2,
+  "camera_index": 0,
+  "camera_width": 960,
+  "camera_height": 540,
+  "draw_landmarks": true,
+  "hand_model_complexity": 0,
+  "hand_min_detection_confidence": 0.6,
+  "hand_min_tracking_confidence": 0.55,
+  "voice_enabled": true,
+  "voice_model_dir": "vosk-model-small-en-us-0.15",
+  "voice_sample_rate": 16000,
+  "voice_phrase_cooldown_sec": 1.0,
+  "static_confidence_threshold": 0.7,
+  "intent_safety_threshold": 0.55,
+  "override_duration_sec": 5.0,
+  "mode_switch_cooldown_sec": 1.5,
+  "drs_hold_time_sec": 0.5,
+  "system_action_cooldown_sec": 2.0,
+  "static_train_epochs": 125,
+  "dataset_target_samples": 320,
+  "dataset_capture_interval_sec": 0.09,
+  "mss_monitor_index": 1,
+  "brightness_display_index": 0,
+  "dynamic_modes": [
+    "CURSOR",
+    "VOLUME",
+    "BRIGHTNESS",
+    "SCROLL",
+    "ZOOM",
+    "NAVIGATION",
+    "ROTATION"
+  ],
+  "gesture_cooldowns": {
+    "Fist": 1.5,
+    "Thumb": 1.5,
+    "V Sign": 1.5,
+    "OK Sign": 1.0,
+    "Three Fingers": 1.5,
+    "DRS T-Frame": 2.0
+  },
+  "system_commands": {
+    "play_pause": "nircmd sendkeypress space",
+    "mute_toggle": "nircmd mutesysvolume 2"
+  }
+}

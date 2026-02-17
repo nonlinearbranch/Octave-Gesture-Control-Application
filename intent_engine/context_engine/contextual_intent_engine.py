@@ -1,9 +1,20 @@
-SAFETY_THRESHOLD = 0.55
+from utils.helpers import get_setting
+
+
+FAMILY_MEMBERS = {
+    "MAGNITUDE": ["Volume", "Brightness", "Zoom", "ScrollSpeed", "PlaybackSpeed"],
+    "CURSOR": ["FreeMove", "HoverFocus", "PrecisionPoint", "TextFieldFocus"],
+    "GRAB": ["WindowDrag", "ObjectMove", "Resize", "SelectionBox"],
+    "ROTATION": ["KnobAdjust", "ObjectRotate"],
+    "NAVIGATION": ["TabSwitch", "DesktopSwitch", "SlideNavigate", "TimelineJump"],
+    "SCROLL": ["VerticalScroll"]
+}
 
 
 def choose_intent(scores):
+    safety_threshold = float(get_setting("intent_safety_threshold", 0.55))
     best = max(scores, key=scores.get)
-    if scores[best] > SAFETY_THRESHOLD:
+    if scores[best] > safety_threshold:
         return best, scores[best]
     return None, 0.0
 
@@ -19,16 +30,22 @@ def score_magnitude(features):
         "PlaybackSpeed": 0.0
     }
 
-    media = features["motion_score"]
+    motion = features["motion_score"]
+    media_ui = features.get("media_ui_score", 0.0)
+    timeline = features.get("timeline_score", 0.0)
+    slider = features["slider_score"]
+    scrollbar = features["scrollbar_score"]
+    text = features["text_density"]
+    center = features.get("center_object_score", 0.0)
 
-    scores["PlaybackSpeed"] += media * 0.8
-    scores["Volume"] += media * 0.6
+    scores["Volume"] += media_ui * 0.75 + timeline * 0.4 + slider * 0.35 + motion * 0.2
+    scores["PlaybackSpeed"] += media_ui * 0.7 + timeline * 0.6 + motion * 0.25
 
-    scores["ScrollSpeed"] += features["scrollbar_score"] * (1 - media) * 0.9
+    scores["ScrollSpeed"] += scrollbar * 0.85 + text * 0.3 + (1 - media_ui) * 0.25
 
-    scores["Zoom"] += features["text_density"] * (1 - media) * 0.6
+    scores["Zoom"] += center * 0.6 + features["large_rect_score"] * 0.35 + (1 - text) * 0.25
 
-    scores["Brightness"] += features["slider_score"] * 0.4
+    scores["Brightness"] += slider * 0.75 + features["edge_density"] * 0.2 + (1 - timeline) * 0.15
 
     return scores
 
@@ -111,7 +128,8 @@ def score_navigation(features):
 
     scores["SlideNavigate"] += features["large_rect_score"] * 0.7
 
-    scores["TimelineJump"] += features["slider_score"] * 0.7
+    scores["TimelineJump"] += features["slider_score"] * 0.5
+    scores["TimelineJump"] += features.get("timeline_score", 0.0) * 0.7
 
     return scores
 

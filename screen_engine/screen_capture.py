@@ -1,11 +1,15 @@
 import mss
 import numpy as np
 import cv2
+from utils.helpers import get_setting
 
 
 def capture_resized(scale=0.25):
     with mss.mss() as sct:
-        monitor = sct.monitors[1]
+        idx = int(get_setting("mss_monitor_index", 1))
+        if idx < 1 or idx >= len(sct.monitors):
+            idx = 1
+        monitor = sct.monitors[idx]
         img = sct.grab(monitor)
 
     frame = np.array(img)

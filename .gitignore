@@ -19,6 +19,8 @@ venv/
 # ===== ML generated =====
 ml_engine/data/models/
 ml_engine/data/*.csv
+ml_engine/data/vosk-model-*/
+ml_engine/data/*.zip
 
 # (keep label_map.json tracked)
 !ml_engine/data/label_map.json
@@ -41,3 +43,6 @@ out/
 # ===== Screenshots / temp =====
 screenshots/
 temp/
+config/runtime_state.json
+config/engine_commands.jsonl
+config/engine_events.jsonl

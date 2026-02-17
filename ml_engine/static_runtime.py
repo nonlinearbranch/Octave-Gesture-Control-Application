@@ -1,10 +1,10 @@
 import torch
 import torch.nn.functional as F
 from ml_engine.static_model import StaticGestureModel
+from utils.helpers import get_setting
 
 model = None
 num_classes = None
-confidence_threshold = 0.7
 
 
 def init_static_model(model_path, input_size, classes):
@@ -16,6 +16,9 @@ def init_static_model(model_path, input_size, classes):
 
 
 def run_static_inference(features):
+    confidence_threshold = float(get_setting("static_confidence_threshold", 0.7))
+    if model is None:
+        return -1
     with torch.no_grad():
         x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
         out = model(x)
