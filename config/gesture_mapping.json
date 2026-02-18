@@ -1,0 +1,50 @@
+{
+  "dynamic_families": {
+    "MAGNITUDE": [
+      "Volume",
+      "Brightness",
+      "Zoom",
+      "ScrollSpeed",
+      "PlaybackSpeed"
+    ],
+    "CURSOR": [
+      "FreeMove",
+      "HoverFocus",
+      "PrecisionPoint",
+      "TextFieldFocus"
+    ],
+    "GRAB": [
+      "WindowDrag",
+      "ObjectMove",
+      "Resize",
+      "SelectionBox"
+    ],
+    "NAVIGATION": [
+      "TabSwitch",
+      "DesktopSwitch",
+      "SlideNavigate",
+      "TimelineJump"
+    ],
+    "ROTATION": [
+      "KnobAdjust",
+      "ObjectRotate"
+    ],
+    "SCROLL": [
+      "VerticalScroll"
+    ]
+  },
+  "static_actions": {
+    "Fist": "PlayPause",
+    "Thumb": "MuteToggle",
+    "V Sign": "AltRight",
+    "OK Sign": "Click",
+    "Three Fingers": "ModeSwitch",
+    "DRS T-Frame": "OpenVSCode"
+  },
+  "voice_actions": {
+    "open ms word": {
+      "type": "launch_app",
+      "target": "ms word"
+    }
+  }
+}
