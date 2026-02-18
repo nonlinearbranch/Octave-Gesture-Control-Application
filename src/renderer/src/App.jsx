@@ -599,8 +599,7 @@ function App() {
   const [engineRuntime, setEngineRuntime] = useState(null)
   const [engineHealth, setEngineHealth] = useState(null)
   const [engineStderr, setEngineStderr] = useState('')
-  const videoRef = useRef(null)
-  const cameraStreamRef = useRef(null)
+
   const micStreamRef = useRef(null)
   const micFrameRef = useRef(null)
   const lastEngineSettingsJsonRef = useRef('')
@@ -1177,9 +1176,19 @@ function App() {
   const createGesture = (preset) => {
     if (!preset) return null
     const id = `${preset.id}-${Date.now()}`
+
+    // Ensure unique title to prevent backend label collisions
+    let baseTitle = preset.templateTitle || 'New Gesture'
+    let title = baseTitle
+    let counter = 1
+    while (gestures.some((g) => g.title.toLowerCase() === title.toLowerCase())) {
+      counter++
+      title = `${baseTitle} (${counter})`
+    }
+
     const created = {
       id,
-      title: preset.templateTitle || 'New Gesture',
+      title,
       subtitle: preset.templateSubtitle || 'Custom gesture mapping',
       type: preset.type || 'hand',
       controlModel: preset.controlModel || 'static',
@@ -1792,7 +1801,7 @@ function App() {
                 <div className="preview-video-wrap">
                   {/* [MODIFIED] Use MJPEG Stream from Python */}
                   <img
-                    src={engineStatus.running ? "http://127.0.0.1:5000/video_feed" : ""}
+                    src={engineStatus.running || trainingSession ? "http://127.0.0.1:5000/video_feed" : ""}
                     className="preview-video"
                     alt="Camera Feed"
                     style={{ objectFit: 'cover', width: '100%', height: '100%', background: '#000' }}
