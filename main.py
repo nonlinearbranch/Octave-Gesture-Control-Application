@@ -4,6 +4,7 @@ import threading
 import json
 import time
 import os
+import shutil
 
 from ml_engine.feature_extraction import extract_features
 from ml_engine.static_runtime import init_static_model, run_static_inference
@@ -45,9 +46,28 @@ COMMAND_INTERVAL = float(get_setting("command_poll_interval_sec", 0.25))
 
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
-label_map_path = os.path.join(base_dir, "ml_engine", "data", "label_map.json")
-model_path = os.path.join(base_dir, "ml_engine", "data", "models", "static_model.pth")
-vosk_model_path = os.path.join(base_dir, "ml_engine", "data", str(get_setting("voice_model_dir", "vosk-model-small-en-us-0.15")))
+data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
+if not os.path.isabs(data_root):
+    data_root = os.path.abspath(os.path.join(base_dir, data_root))
+
+data_dir = os.path.join(data_root, "ml_engine", "data")
+template_data_dir = os.path.join(base_dir, "ml_engine", "data")
+
+label_map_path = os.path.join(data_dir, "label_map.json")
+model_path = os.path.join(data_dir, "models", "static_model.pth")
+template_label_map_path = os.path.join(template_data_dir, "label_map.json")
+if not os.path.exists(label_map_path) and os.path.exists(template_label_map_path):
+    os.makedirs(os.path.dirname(label_map_path), exist_ok=True)
+    shutil.copyfile(template_label_map_path, label_map_path)
+
+voice_model_dir = str(get_setting("voice_model_dir", "vosk-model-small-en-us-0.15"))
+voice_model_data_path = os.path.join(data_dir, voice_model_dir)
+voice_model_template_path = os.path.join(template_data_dir, voice_model_dir)
+vosk_model_path = (
+    voice_model_data_path
+    if os.path.exists(voice_model_data_path)
+    else voice_model_template_path
+)
 MODEL_RELOAD_INTERVAL = float(get_setting("model_reload_interval_sec", 2.0))
 
 label_map = {}
@@ -160,7 +180,7 @@ def detection_loop():
             hand = hands_list[0]
 
             features = extract_features(hand)
-            gesture_id = run_static_inference(features)
+            gesture_id = run_static_inference(features, hand)
 
             if gesture_id != -1:
                 raw = get_gesture_name(gesture_id)

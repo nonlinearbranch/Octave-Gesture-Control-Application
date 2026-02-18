@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import shutil
 import pandas as pd
 
 from utils.helpers import get_setting, load_gesture_mapping, save_gesture_mapping
@@ -15,9 +16,21 @@ except Exception:
 
 def _paths():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    csv_path = os.path.join(base_dir, "ml_engine", "data", "static_gestures.csv")
-    map_path = os.path.join(base_dir, "ml_engine", "data", "label_map.json")
-    model_path = os.path.join(base_dir, "ml_engine", "data", "models", "static_model.pth")
+    data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
+    if not os.path.isabs(data_root):
+        data_root = os.path.abspath(os.path.join(base_dir, data_root))
+
+    data_dir = os.path.join(data_root, "ml_engine", "data")
+    template_data_dir = os.path.join(base_dir, "ml_engine", "data")
+    csv_path = os.path.join(data_dir, "static_gestures.csv")
+    map_path = os.path.join(data_dir, "label_map.json")
+    model_path = os.path.join(data_dir, "models", "static_model.pth")
+
+    template_map_path = os.path.join(template_data_dir, "label_map.json")
+    if not os.path.exists(map_path) and os.path.exists(template_map_path):
+        os.makedirs(os.path.dirname(map_path), exist_ok=True)
+        shutil.copyfile(template_map_path, map_path)
+
     return csv_path, map_path, model_path
 
 
@@ -211,10 +224,15 @@ def collect_samples_for_label(label, target_samples=None, capture_interval=None)
     return samples
 
 
-def retrain_static_model():
+def retrain_static_model(progress_callback=None, epochs=None):
     csv_path, _, model_path = _paths()
     normalize_labels(csv_path=csv_path)
-    return train_static_model(csv_path=csv_path, model_path=model_path)
+    return train_static_model(
+        csv_path=csv_path,
+        model_path=model_path,
+        epochs=epochs,
+        progress_callback=progress_callback
+    )
 
 
 def set_static_action(gesture_name, action):

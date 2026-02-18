@@ -11,3 +11,5 @@ mss==9.0.1
 screen-brightness-control==0.22.1
 vosk==0.3.45
 sounddevice==0.4.7
+flask==3.0.2
+gevent==24.2.1

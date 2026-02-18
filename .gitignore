@@ -39,6 +39,7 @@ Thumbs.db
 node_modules/
 dist/
 out/
+.eslintcache
 
 # ===== Screenshots / temp =====
 screenshots/

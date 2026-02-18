@@ -4,7 +4,7 @@ import time
 import queue
 import threading
 
-from utils.helpers import load_gesture_mapping, get_setting, append_engine_event
+from utils.helpers import GESTURE_MAPPING_PATH, load_gesture_mapping, get_setting, append_engine_event
 
 
 class VoskVoiceListener:
@@ -12,6 +12,7 @@ class VoskVoiceListener:
         self.model_path = model_path
         self.enabled = bool(get_setting("voice_enabled", True))
         self.sample_rate = int(get_setting("voice_sample_rate", 16000))
+        self.input_index = int(get_setting("voice_input_index", -1))
         self.cooldown = float(get_setting("voice_phrase_cooldown_sec", 1.0))
         self.q = queue.Queue()
         self.thread = None
@@ -23,7 +24,7 @@ class VoskVoiceListener:
         self._lock = threading.Lock()
 
     def _load_mapping(self, force=False):
-        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "gesture_mapping.json")
+        path = GESTURE_MAPPING_PATH
         mtime = os.path.getmtime(path) if os.path.exists(path) else 0.0
         if not force and mtime == self._mapping_mtime and self._mapping:
             return self._mapping
@@ -93,6 +94,7 @@ class VoskVoiceListener:
 
         try:
             with sd.RawInputStream(
+                device=self.input_index if self.input_index >= 0 else None,
                 samplerate=self.sample_rate,
                 blocksize=8000,
                 dtype="int16",
@@ -123,6 +125,7 @@ class VoskVoiceListener:
 
     def poll_event(self):
         self._load_mapping()
+        self.input_index = int(get_setting("voice_input_index", self.input_index))
         with self._lock:
             ev = self.event
             self.event = None

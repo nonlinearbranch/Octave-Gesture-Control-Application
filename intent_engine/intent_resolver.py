@@ -134,6 +134,10 @@ def _run_static_gesture(gesture_name):
         return
 
     mapping = load_gesture_mapping()
+    disabled_static = mapping.get("disabled_static", []) or []
+    if gesture_name in disabled_static:
+        return
+
     static_actions = mapping.get("static_actions", {})
     action = static_actions.get(gesture_name)
     if execute_custom_action(action):

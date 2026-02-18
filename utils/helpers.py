@@ -4,11 +4,21 @@ import time
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SETTINGS_PATH = os.path.join(BASE_DIR, "config", "settings.json")
-GESTURE_MAPPING_PATH = os.path.join(BASE_DIR, "config", "gesture_mapping.json")
-RUNTIME_STATE_PATH = os.path.join(BASE_DIR, "config", "runtime_state.json")
-ENGINE_COMMANDS_PATH = os.path.join(BASE_DIR, "config", "engine_commands.jsonl")
-ENGINE_EVENTS_PATH = os.path.join(BASE_DIR, "config", "engine_events.jsonl")
+DATA_DIR = os.environ.get("OCTAVE_DATA_DIR", "").strip() or BASE_DIR
+if not os.path.isabs(DATA_DIR):
+    DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, DATA_DIR))
+
+CONFIG_DIR = os.path.join(DATA_DIR, "config")
+TEMPLATE_CONFIG_DIR = os.path.join(BASE_DIR, "config")
+
+SETTINGS_TEMPLATE_PATH = os.path.join(TEMPLATE_CONFIG_DIR, "settings.json")
+GESTURE_MAPPING_TEMPLATE_PATH = os.path.join(TEMPLATE_CONFIG_DIR, "gesture_mapping.json")
+
+SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
+GESTURE_MAPPING_PATH = os.path.join(CONFIG_DIR, "gesture_mapping.json")
+RUNTIME_STATE_PATH = os.path.join(CONFIG_DIR, "runtime_state.json")
+ENGINE_COMMANDS_PATH = os.path.join(CONFIG_DIR, "engine_commands.jsonl")
+ENGINE_EVENTS_PATH = os.path.join(CONFIG_DIR, "engine_events.jsonl")
 
 
 DEFAULT_SETTINGS = {
@@ -27,6 +37,7 @@ DEFAULT_SETTINGS = {
     "voice_enabled": True,
     "voice_model_dir": "vosk-model-small-en-us-0.15",
     "voice_sample_rate": 16000,
+    "voice_input_index": -1,
     "voice_phrase_cooldown_sec": 1.0,
     "static_confidence_threshold": 0.7,
     "intent_safety_threshold": 0.55,
@@ -34,6 +45,7 @@ DEFAULT_SETTINGS = {
     "mode_switch_cooldown_sec": 1.5,
     "drs_hold_time_sec": 0.5,
     "system_action_cooldown_sec": 2.0,
+    "static_train_epochs": 55,
     "dataset_target_samples": 320,
     "dataset_capture_interval_sec": 0.09,
     "mss_monitor_index": 1,
@@ -84,6 +96,7 @@ def load_settings(force=False):
     now = time.time()
     if not force and _cache is not None and now - _cache_time < 1.0:
         return _cache
+    _seed_json_if_missing(SETTINGS_PATH, DEFAULT_SETTINGS, SETTINGS_TEMPLATE_PATH)
     if os.path.exists(SETTINGS_PATH):
         try:
             with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -133,6 +146,15 @@ def save_json(path, payload):
         json.dump(payload, f, indent=2)
 
 
+def _seed_json_if_missing(path, fallback, template_path=None):
+    if os.path.exists(path):
+        return
+    payload = fallback
+    if template_path and os.path.exists(template_path):
+        payload = load_json(template_path, fallback)
+    save_json(path, payload)
+
+
 def default_gesture_mapping():
     return {
         "dynamic_families": {
@@ -151,12 +173,18 @@ def default_gesture_mapping():
             "Three Fingers": "ModeSwitch",
             "DRS T-Frame": "OpenVSCode"
         },
+        "disabled_static": [],
         "voice_actions": {}
     }
 
 
 def load_gesture_mapping(force=False):
     global _mapping_cache, _mapping_mtime
+    _seed_json_if_missing(
+        GESTURE_MAPPING_PATH,
+        default_gesture_mapping(),
+        GESTURE_MAPPING_TEMPLATE_PATH
+    )
     if not os.path.exists(GESTURE_MAPPING_PATH):
         payload = default_gesture_mapping()
         save_json(GESTURE_MAPPING_PATH, payload)

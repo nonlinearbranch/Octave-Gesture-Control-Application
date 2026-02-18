@@ -14,12 +14,16 @@ except Exception:
 
 def _default_paths():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    csv_path = os.path.join(base_dir, "ml_engine", "data", "static_gestures.csv")
-    model_path = os.path.join(base_dir, "ml_engine", "data", "models", "static_model.pth")
+    data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
+    if not os.path.isabs(data_root):
+        data_root = os.path.abspath(os.path.join(base_dir, data_root))
+    data_dir = os.path.join(data_root, "ml_engine", "data")
+    csv_path = os.path.join(data_dir, "static_gestures.csv")
+    model_path = os.path.join(data_dir, "models", "static_model.pth")
     return csv_path, model_path
 
 
-def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001):
+def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001, progress_callback=None):
     default_csv, default_model = _default_paths()
     csv_path = csv_path or default_csv
     model_path = model_path or default_model
@@ -49,6 +53,7 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
+    epochs_run = 0
     for epoch in range(epochs):
         outputs = model(X)
         loss = criterion(outputs, y)
@@ -57,8 +62,13 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001):
         loss.backward()
         optimizer.step()
 
+        epochs_run = epoch + 1
         if epoch % 5 == 0:
             print("Epoch", epoch, "Loss:", loss.item())
+        if progress_callback is not None:
+            should_continue = progress_callback(epoch + 1, epochs, float(loss.item()))
+            if should_continue is False:
+                break
 
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     torch.save(model.state_dict(), model_path)
@@ -66,7 +76,8 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001):
     return {
         "model_path": model_path,
         "num_classes": num_classes,
-        "rows": len(data)
+        "rows": len(data),
+        "epochs_run": epochs_run
     }
 
 
