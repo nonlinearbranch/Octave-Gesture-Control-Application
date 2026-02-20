@@ -7,6 +7,27 @@ import { createInterface } from 'readline'
 
 const REQUEST_TIMEOUT_MS = 15000
 
+/**
+ * In packaged mode the Python backend is bundled as:
+ *   <app.asar.unpacked>/python_dist/service/service.exe
+ *
+ * We look for the exe first; if found we launch it directly (no python command,
+ * no script path argument).  In dev mode we fall back to the system python.
+ */
+const getBundledExePath = () => {
+  if (!app.isPackaged) return null
+
+  const appPath = app.getAppPath() // …/resources/app.asar
+  const unpackedRoot = appPath.replace('app.asar', 'app.asar.unpacked')
+
+  const candidates = [
+    join(unpackedRoot, 'python_dist', 'service', 'service.exe'),
+    join(process.resourcesPath, 'app.asar.unpacked', 'python_dist', 'service', 'service.exe')
+  ]
+
+  return candidates.find((p) => existsSync(p)) || null
+}
+
 const pickScriptPath = () => {
   const appPath = app.getAppPath()
   const unpackedRoot = appPath.includes('app.asar')
@@ -29,22 +50,36 @@ const pickScriptPath = () => {
   return candidates.find((path) => existsSync(path)) || candidates[candidates.length - 1]
 }
 
+/**
+ * Returns the list of launch candidates to try in order.
+ * When the app is packaged and service.exe exists, only one candidate is returned.
+ * In dev mode the existing system-python fallback chain is used.
+ */
 const getLaunchCandidates = () => {
+  // 1. Explicit override via env var (works in both dev and packaged)
   const fromEnv = process.env.OCTAVE_PYTHON_BIN
   if (fromEnv && fromEnv.trim()) {
-    return [{ command: fromEnv.trim(), args: [] }]
+    return [{ command: fromEnv.trim(), args: [], useExe: false }]
   }
 
+  // 2. Packaged mode – use the bundled service.exe
+  const bundledExe = getBundledExePath()
+  if (bundledExe) {
+    console.log(`[EngineService] Using bundled exe: ${bundledExe}`)
+    return [{ command: bundledExe, args: [], useExe: true }]
+  }
+
+  // 3. Dev mode – system python
   if (process.platform === 'win32') {
     return [
-      { command: 'python', args: [] },
-      { command: 'py', args: ['-3'] }
+      { command: 'python', args: [], useExe: false },
+      { command: 'py', args: ['-3'], useExe: false }
     ]
   }
 
   return [
-    { command: 'python3', args: [] },
-    { command: 'python', args: [] }
+    { command: 'python3', args: [], useExe: false },
+    { command: 'python', args: [], useExe: false }
   ]
 }
 
@@ -60,7 +95,9 @@ class EngineService extends EventEmitter {
     this.lastRuntime = null
     this.lastStatus = { connected: false, running: false, phase: 'stopped', lastError: '' }
     this.startPromise = null
+    this.pythonExe = null  // populated after successful spawn
   }
+
 
   getStatusSnapshot() {
     return {
@@ -137,15 +174,25 @@ class EngineService extends EventEmitter {
   }
 
   _spawnWithCandidate(candidate) {
-    const scriptPath = pickScriptPath()
+    // When using the bundled exe, the command IS the executable; no script path needed.
+    // In dev mode, we append the script path as an argument to the python command.
+    const scriptPath = candidate.useExe ? null : pickScriptPath()
     const command = candidate.command
-    const args = [...candidate.args, scriptPath]
-    const cwd = dirname(scriptPath)
+    const args = candidate.useExe
+      ? [...candidate.args]                       // exe needs no extra args
+      : [...candidate.args, scriptPath]           // python <path/to/service.py>
+
+    // cwd: for the exe use its own directory so relative imports resolve;
+    // for dev script use the script's directory.
+    const cwd = candidate.useExe
+      ? dirname(command)
+      : dirname(scriptPath)
 
     return new Promise((resolve, reject) => {
       let settled = false
       let readyTimeout = null
 
+      console.log(`[EngineService] Spawning: ${command} ${args.join(' ')}`)
       const child = spawn(command, args, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -153,6 +200,7 @@ class EngineService extends EventEmitter {
         env: {
           ...process.env,
           PYTHONIOENCODING: 'utf-8',
+          PYTHONUNBUFFERED: '1',
           OCTAVE_DATA_DIR: app.getPath('userData')
         }
       })
@@ -170,20 +218,24 @@ class EngineService extends EventEmitter {
         } catch {
           // ignore kill errors
         }
+        console.error(`[EngineService] Startup failed: ${error.message}`)
         reject(error)
       }
 
       child.once('error', (error) => {
+        console.error(`[EngineService] Child process error: ${error.message}`)
         fail(error)
       })
 
       child.once('exit', (code, signal) => {
         if (settled) return
+        console.error(`[EngineService] Child exited early: code=${code}, signal=${signal}`)
         fail(new Error(`Engine exited early (${code ?? 'null'}, ${signal ?? 'null'})`))
       })
 
       const rl = createInterface({ input: child.stdout })
       rl.on('line', (line) => {
+        console.log(`[EngineService] stdout: ${line}`)
         let parsed = null
         try {
           parsed = JSON.parse(line)
@@ -191,6 +243,7 @@ class EngineService extends EventEmitter {
           return
         }
         if (parsed.type === 'engine.ready' && !settled) {
+          console.log('[EngineService] Engine ready signal received.')
           settled = true
           cleanup()
           rl.close()
@@ -198,9 +251,13 @@ class EngineService extends EventEmitter {
         }
       })
 
+      child.stderr.on('data', (chunk) => {
+        console.error(`[EngineService] stderr: ${chunk.toString()}`)
+      })
+
       readyTimeout = setTimeout(() => {
         fail(new Error('Engine startup timed out'))
-      }, 7000)
+      }, 20000)
     })
   }
 
@@ -221,7 +278,11 @@ class EngineService extends EventEmitter {
         try {
           const started = await this._spawnWithCandidate(candidate)
           this.child = started.child
+          // child.spawnfile has the OS-resolved binary path (e.g. C:\Python311\python.exe)
+          // Fall back to the candidate command string if spawnfile is unavailable
+          this.pythonExe = started.child.spawnfile || started.command
           this.connected = true
+
           this.lastError = ''
           this.lastStatus = {
             connected: true,
@@ -230,19 +291,21 @@ class EngineService extends EventEmitter {
             lastError: ''
           }
 
+
           this.readline = createInterface({ input: this.child.stdout })
           this.readline.on('line', (line) => {
             try {
               const parsed = JSON.parse(line)
               this._handleMessage(parsed)
             } catch {
-              // ignore non-json lines
+              console.log(`[EngineService] stdout: ${line}`)
             }
           })
 
           this.child.stderr.on('data', (chunk) => {
             const text = String(chunk || '').trim()
             if (!text) return
+            console.error(`[EngineService] stderr: ${text}`)
             this.emit('engine.stderr', { text })
           })
 

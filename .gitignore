@@ -4,3 +4,18 @@ out
 .DS_Store
 .eslintcache
 *.log*
+
+# PyInstaller build output
+python_dist/
+build/service/
+build_spec_cache/
+*.spec.bak
+
+# PyInstaller temp/analysis files
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp build logs
+eb_log*.txt
+pyinstaller_log.txt

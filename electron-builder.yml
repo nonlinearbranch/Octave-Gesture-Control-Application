@@ -1,22 +1,28 @@
-appId: com.electron.app
-productName: gesture-control-app
+appId: com.octave.app
+productName: Octave
 directories:
   buildResources: build
 files:
+  - out/**
+  - resources/**
+  - python_dist/service/**
+  - node_modules/@electron-toolkit/**
   - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
 asarUnpack:
   - resources/**
+  - python_dist/service/**
 win:
-  executableName: gesture-control-app
+  executableName: Octave
+  icon: build/icon.ico
+  forceCodeSigning: false
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  createStartMenuShortcut: true
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
