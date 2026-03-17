@@ -1,6 +1,6 @@
-# gesture-control-app
+# Octave
 
-An Electron application with React
+Octave is an Electron desktop application for gesture and voice-based desktop control on Windows.
 
 ## Recommended IDE Setup
 
@@ -32,3 +32,21 @@ $ npm run build:mac
 # For Linux
 $ npm run build:linux
 ```
+
+## Windows Release
+
+The Windows installer is generated at:
+
+```bash
+dist/Octave-1.1.0-setup.exe
+```
+
+The unpacked app for smoke testing is generated at:
+
+```bash
+dist/win-unpacked/
+```
+
+## Release Notes
+
+See [CHANGELOG.md](./CHANGELOG.md) for the `1.1.0` release summary.

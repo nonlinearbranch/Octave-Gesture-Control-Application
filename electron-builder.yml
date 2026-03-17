@@ -18,9 +18,14 @@ win:
   icon: build/icon.ico
   forceCodeSigning: false
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: ${productName}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
+  oneClick: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  runAfterFinish: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
 mac:
@@ -43,6 +48,3 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates
