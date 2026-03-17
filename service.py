@@ -1,4 +1,3 @@
-import importlib
 import csv
 import importlib
 import json
@@ -7,14 +6,12 @@ import shutil
 import sys
 import threading
 import time
-import traceback
+
 import traceback
 import uuid
 import logging
-import io
-
-from flask import Flask, Response, request, jsonify
-from gevent.pywsgi import WSGIServer
+# flask and gevent are imported lazily inside StreamingServer.run()
+# to avoid blocking the engine.ready signal
 
 from utils.helpers import (
     SETTINGS_PATH,
@@ -39,6 +36,36 @@ RESTART_SENSITIVE_SETTINGS = {
     "voice_model_dir",
     "voice_sample_rate"
 }
+
+FRIENDLY_ACTIONS = {
+    "Play/Pause Media": "PlayPause",
+    "Mute/Unmute Audio": "MuteToggle",
+    "Volume Up": "VolumeUp",
+    "Volume Down": "VolumeDown",
+    "Next Track": "NextTrack",
+    "Prev Track": "PrevTrack",
+    "Navigate Next/Previous": "AltRight",
+    "Switch Tab": "SwitchTab",
+    "Switch Window": "SwitchWindow",
+    "Scroll Up": "ScrollUp",
+    "Scroll Down": "ScrollDown",
+    "Go Back": "GoBack",
+    "Go Forward": "GoForward",
+    "Confirm / Enter": "ConfirmEnter",
+    "Escape": "Escape",
+    "Screenshot": "Screenshot",
+    "Lock Screen": "LockScreen",
+    "Launch VS Code": "OpenVSCode",
+    "Launch Browser": "OpenBrowser",
+    "Click": "Click",
+    "Double Click": "DoubleClick",
+    "Right Click": "RightClick",
+    "Middle Click": "MiddleClick"
+}
+
+
+class TrainingCancelledError(Exception):
+    pass
 
 
 class JsonEmitter:
@@ -70,10 +97,36 @@ def _merge_dict(base, updates):
     return out
 
 
+def _data_root():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
+    if not os.path.isabs(data_root):
+        data_root = os.path.abspath(os.path.join(base_dir, data_root))
+    return data_root
+
+
+def _static_model_path():
+    return os.path.join(_data_root(), "ml_engine", "data", "models", "static_model.pth")
+
+
+def _normalize_action(action):
+    if isinstance(action, dict):
+        return action
+    if not isinstance(action, str):
+        return None
+
+    text = action.strip()
+    if not text:
+        return None
+
+    return FRIENDLY_ACTIONS.get(text, text)
+
+
 # --- FLASK STREAMING SERVER ---
 
 class StreamingServer:
     def __init__(self):
+        from flask import Flask, Response  # lazy – only used inside this server
         self.app = Flask(__name__)
         self.frame_data = None
         self.lock = threading.Lock()
@@ -110,7 +163,9 @@ class StreamingServer:
 
     def run(self, host='127.0.0.1', port=5000):
         try:
-            self.server = WSGIServer((host, port), self.app)
+            from flask import Flask, Response, request, jsonify  # noqa: F401
+            from gevent.pywsgi import WSGIServer as _WSGIServer
+            self.server = _WSGIServer((host, port), self.app)
             self.server.serve_forever()
         except Exception:
             pass
@@ -158,12 +213,12 @@ class TrainingCoordinator:
         return fallback
 
     def _default_action_from_payload(self, payload, gesture_type):
-        action = payload.get("action")
-        if isinstance(action, (str, dict)):
+        action = _normalize_action(payload.get("action"))
+        if action is not None:
             return action
         if gesture_type == "voice":
-            voice_action = payload.get("voiceAction")
-            if isinstance(voice_action, (str, dict)):
+            voice_action = _normalize_action(payload.get("voiceAction"))
+            if voice_action is not None:
                 return voice_action
             return "Click"
         return "Click"
@@ -220,18 +275,25 @@ class TrainingCoordinator:
             }
         )
 
-    def _append_samples(self, rows):
+    def _write_samples(self, csv_path, rows):
         if not rows:
             return
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
-        if not os.path.isabs(data_root):
-            data_root = os.path.abspath(os.path.join(base_dir, data_root))
-        csv_path = os.path.join(data_root, "ml_engine", "data", "static_gestures.csv")
         os.makedirs(os.path.dirname(csv_path), exist_ok=True)
         with open(csv_path, "a", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerows(rows)
+
+    def _training_paths(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
+        if not os.path.isabs(data_root):
+            data_root = os.path.abspath(os.path.join(base_dir, data_root))
+        data_dir = os.path.join(data_root, "ml_engine", "data")
+        return {
+            "data_dir": data_dir,
+            "csv_path": os.path.join(data_dir, "static_gestures.csv"),
+            "model_path": os.path.join(data_dir, "models", "static_model.pth")
+        }
 
     def _run_voice_training(self, job):
         from ml_engine.gesture_manager import set_voice_action
@@ -268,7 +330,7 @@ class TrainingCoordinator:
         import mediapipe as mp
 
         from ml_engine.feature_extraction import extract_features
-        from ml_engine.gesture_manager import add_gesture, retrain_static_model, set_static_action
+        from ml_engine.gesture_manager import add_gesture, load_label_map, retrain_static_model, set_static_action
         append_engine_event(
             "training_stage",
             {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "imports_done"}
@@ -291,146 +353,197 @@ class TrainingCoordinator:
             "training_stage",
             {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "labeling"}
         )
-        label = add_gesture(gesture_name)
-        if not is_locked:
-            set_static_action(gesture_name, action)
-
-        self._emit_progress(job, 2, done=False)
-        append_engine_event(
-            "training_stage",
-            {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "camera_prepare"}
-        )
-
-        mp_hands = mp.solutions.hands
-        hands = mp_hands.Hands(
-            max_num_hands=1,
-            model_complexity=int(get_setting("hand_model_complexity", 0)),
-            min_detection_confidence=float(get_setting("hand_min_detection_confidence", 0.6)),
-            min_tracking_confidence=float(get_setting("hand_min_tracking_confidence", 0.55))
-        )
-
-        camera_index = int(get_setting("camera_index", 0))
-        cap = None
-        for attempt in range(5):
-            cap = cv2.VideoCapture(camera_index)
-            if cap.isOpened():
+        label_map = load_label_map()
+        label = None
+        for label_key, label_name in label_map.items():
+            if str(label_name).strip().lower() == gesture_name.lower():
+                label = int(label_key)
                 break
-            time.sleep(0.4)
-        
-        if not cap or not cap.isOpened():
-            hands.close()
-            raise RuntimeError(f"Unable to open camera index {camera_index} (busy?)")
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(get_setting("camera_width", 960)))
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(get_setting("camera_height", 540)))
-
-        rows = []
-        samples = 0
-        last_capture_t = 0.0
-        capture_start_t = time.time()
-        max_capture_wait = float(payload.get("maxCaptureWaitSec", 90))
-        append_engine_event(
-            "training_stage",
-            {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "capture_loop"}
-        )
+        if label is None:
+            label = max((int(key) for key in label_map.keys()), default=-1) + 1
+        paths = self._training_paths()
+        temp_dir = os.path.join(paths["data_dir"], "tmp")
+        temp_csv_path = os.path.join(temp_dir, f"train-{job['session_id']}.csv")
+        temp_model_path = os.path.join(temp_dir, f"train-{job['session_id']}.pth")
+        os.makedirs(temp_dir, exist_ok=True)
 
         try:
-            while samples < target_samples:
-                if job["cancel_event"].is_set():
-                    self._emit_progress(job, 0, done=False, cancelled=True)
-                    return
+            self._emit_progress(job, 2, done=False)
+            append_engine_event(
+                "training_stage",
+                {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "camera_prepare"}
+            )
 
-                if time.time() - capture_start_t > max_capture_wait:
-                    raise RuntimeError(
-                        "Timed out while capturing samples. Keep your hand in frame and retry."
-                    )
+            mp_hands = mp.solutions.hands
+            hands = mp_hands.Hands(
+                max_num_hands=1,
+                model_complexity=int(get_setting("hand_model_complexity", 0)),
+                min_detection_confidence=float(get_setting("hand_min_detection_confidence", 0.6)),
+                min_tracking_confidence=float(get_setting("hand_min_tracking_confidence", 0.55))
+            )
 
-                ok, frame = cap.read()
-                if not ok:
-                    time.sleep(0.01)
-                    time.sleep(0.01)
-                    continue
+            camera_index = int(get_setting("camera_index", 0))
+            cap = None
+            for attempt in range(5):
+                if sys.platform == "win32":
+                    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                else:
+                    cap = cv2.VideoCapture(camera_index)
 
-                frame = cv2.flip(frame, 1)
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = hands.process(rgb)
-                if not result.multi_hand_landmarks:
-                    # Stream even if no hands found
+                if cap.isOpened():
+                    break
+                if cap:
+                    cap.release()
+                time.sleep(0.5)
+
+            if not cap or not cap.isOpened():
+                if cap:
+                    cap.release()
+                hands.close()
+                raise RuntimeError(f"Unable to open camera index {camera_index} (busy?)")
+
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(get_setting("camera_width", 960)))
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(get_setting("camera_height", 540)))
+
+            rows = []
+            samples = 0
+            last_capture_t = 0.0
+            capture_start_t = time.time()
+            max_capture_wait = float(payload.get("maxCaptureWaitSec", 90))
+            append_engine_event(
+                "training_stage",
+                {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "capture_loop"}
+            )
+
+            try:
+                while samples < target_samples:
+                    if job["cancel_event"].is_set():
+                        raise TrainingCancelledError()
+
+                    if time.time() - capture_start_t > max_capture_wait:
+                        raise RuntimeError(
+                            "Timed out while capturing samples. Keep your hand in frame and retry."
+                        )
+
+                    ok, frame = cap.read()
+                    if not ok:
+                        time.sleep(0.02)
+                        continue
+
+                    frame = cv2.flip(frame, 1)
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    result = hands.process(rgb)
+                    if not result.multi_hand_landmarks:
+                        if self.stream_callback:
+                            ret, jpeg = cv2.imencode('.jpg', frame)
+                            if ret:
+                                self.stream_callback(jpeg.tobytes())
+                        continue
+
                     if self.stream_callback:
-                        ret, jpeg = cv2.imencode('.jpg', frame)
+                        annotated = frame.copy()
+                        for hand_landmarks in result.multi_hand_landmarks:
+                            mp.solutions.drawing_utils.draw_landmarks(
+                                annotated,
+                                hand_landmarks,
+                                mp.solutions.hands.HAND_CONNECTIONS
+                            )
+                        cv2.putText(
+                            annotated,
+                            f"Samples: {samples}/{target_samples}",
+                            (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 255, 0),
+                            2
+                        )
+
+                        ret, jpeg = cv2.imencode('.jpg', annotated)
                         if ret:
                             self.stream_callback(jpeg.tobytes())
-                    continue
 
-                # Draw landmarks for stream
-                if self.stream_callback:
-                    annotated = frame.copy()
-                    for hand_landmarks in result.multi_hand_landmarks:
-                        mp.solutions.drawing_utils.draw_landmarks(
-                            annotated,
-                            hand_landmarks,
-                            mp.solutions.hands.HAND_CONNECTIONS
-                        )
-                    # Add simple overlay
-                    cv2.putText(annotated, f"Samples: {samples}/{target_samples}", (20, 40), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    
-                    ret, jpeg = cv2.imencode('.jpg', annotated)
-                    if ret:
-                        self.stream_callback(jpeg.tobytes())
+                    now_t = time.time()
+                    if now_t - last_capture_t < capture_interval:
+                        continue
+                    hand = result.multi_hand_landmarks[0]
+                    feat = extract_features(hand)
+                    rows.append(list(feat) + [int(label)])
+                    samples += 1
+                    last_capture_t = now_t
+                    progress = 5 + int((samples / target_samples) * 72)
+                    self._emit_progress(job, progress, done=False)
+            finally:
+                cap.release()
+                hands.close()
 
-                now_t = time.time()
-                if now_t - last_capture_t < capture_interval:
-                    continue
-                hand = result.multi_hand_landmarks[0]
-                feat = extract_features(hand)
-                rows.append(list(feat) + [int(label)])
-                samples += 1
-                last_capture_t = now_t
-                progress = 5 + int((samples / target_samples) * 72)
-                self._emit_progress(job, progress, done=False)
+            if os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
+            if os.path.exists(paths["csv_path"]):
+                shutil.copyfile(paths["csv_path"], temp_csv_path)
+            self._write_samples(temp_csv_path, rows)
+            self._emit_progress(job, 80, done=False)
+            append_engine_event(
+                "training_stage",
+                {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "retrain"}
+            )
+
+            epochs_raw = payload.get("epochs", get_setting("static_train_epochs", 55))
+            epochs = max(10, min(140, int(epochs_raw)))
+
+            def on_epoch(epoch_idx, total_epochs, loss):
+                if job["cancel_event"].is_set():
+                    return False
+                progress = 82 + int((epoch_idx / max(1, total_epochs)) * 16)
+                self._emit_progress(
+                    job,
+                    progress,
+                    done=False,
+                    result={"epoch": epoch_idx, "totalEpochs": total_epochs, "loss": loss}
+                )
+                return True
+
+            retrain_out = retrain_static_model(
+                progress_callback=on_epoch,
+                epochs=epochs,
+                csv_path=temp_csv_path,
+                model_path=temp_model_path,
+                normalize=False
+            )
+
+            if job["cancel_event"].is_set() or retrain_out.get("cancelled"):
+                raise TrainingCancelledError()
+
+            committed_label = add_gesture(gesture_name)
+            if committed_label != label:
+                raise RuntimeError("Gesture registry changed during training. Please retry.")
+            if not is_locked:
+                set_static_action(gesture_name, action)
+            self._write_samples(paths["csv_path"], rows)
+            os.makedirs(os.path.dirname(paths["model_path"]), exist_ok=True)
+            shutil.move(temp_model_path, paths["model_path"])
+
+            self._emit_progress(
+                job,
+                100,
+                done=True,
+                result={
+                    "label": label,
+                    "gestureName": gesture_name,
+                    "samples": samples,
+                    "retrain": retrain_out or {}
+                }
+            )
+        except TrainingCancelledError:
+            self._emit_progress(job, 0, done=False, cancelled=True)
+            return
         finally:
-            cap.release()
-            hands.close()
-
-        if job["cancel_event"].is_set():
-            self._emit_progress(job, 0, done=False, cancelled=True)
-            return
-
-        self._append_samples(rows)
-        self._emit_progress(job, 80, done=False)
-        append_engine_event(
-            "training_stage",
-            {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "retrain"}
-        )
-
-        epochs_raw = payload.get("epochs", get_setting("static_train_epochs", 55))
-        epochs = max(10, min(140, int(epochs_raw)))
-
-        def on_epoch(epoch_idx, total_epochs, _loss):
-            if job["cancel_event"].is_set():
-                return False
-            progress = 82 + int((epoch_idx / max(1, total_epochs)) * 16)
-            self._emit_progress(job, progress, done=False)
-            return True
-
-        retrain_out = retrain_static_model(progress_callback=on_epoch, epochs=epochs)
-
-        if job["cancel_event"].is_set():
-            self._emit_progress(job, 0, done=False, cancelled=True)
-            return
-
-        self._emit_progress(
-            job,
-            100,
-            done=True,
-            result={
-                "label": label,
-                "gestureName": gesture_name,
-                "samples": samples,
-                "retrain": retrain_out or {}
-            }
-        )
+            try:
+                if os.path.exists(temp_csv_path):
+                    os.remove(temp_csv_path)
+                if os.path.exists(temp_model_path):
+                    os.remove(temp_model_path)
+            except Exception:
+                pass
 
     def _run(self, job):
         try:
@@ -501,6 +614,25 @@ class RuntimeEngine:
             "fps": 0.0
         }
         self._last_error = None
+        self._startup_event = threading.Event()
+        self._stop_complete_event = threading.Event()
+        self._startup_ok = False
+        # Start preloading heavy imports in background immediately
+        threading.Thread(target=self._preload_imports, daemon=True).start()
+
+    def _preload_imports(self):
+        """Preload heavy modules in background to make 'Start' instant."""
+        try:
+            import cv2
+            import mediapipe
+            import pandas
+            import numpy
+            import torch
+            # Also trigger the heavy submodule loads
+            _ = mediapipe.solutions.hands
+        except Exception:
+            pass  # Failures here are non-fatal; real imports happen in _loop
+
 
     def is_running(self):
         return self._running
@@ -540,7 +672,12 @@ class RuntimeEngine:
     def start(self):
         if self._running:
             return True
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
         self._stop_event.clear()
+        self._stop_complete_event.clear()
+        self._startup_event.clear()
+        self._startup_ok = False
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._running = True
         self._last_error = None
@@ -549,20 +686,21 @@ class RuntimeEngine:
         return True
 
     def stop(self):
-        if not self._running:
+        if not self._running and not (self._thread and self._thread.is_alive()):
             return True
         self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.8)
         self._running = False
         with self._state_lock:
             self._last_state["running"] = False
-        self.emitter.emit("engine.status", {"running": False, "phase": "stopped"})
-        return True
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+        return not (self._thread and self._thread.is_alive())
 
     def _set_error(self, stage, exc):
         self._last_error = f"{stage}: {exc}"
         append_engine_event("engine_error", {"stage": stage, "error": str(exc)})
+        self._startup_ok = False
+        self._startup_event.set()
         self.emitter.emit(
             "engine.error",
             {
@@ -576,20 +714,13 @@ class RuntimeEngine:
         cap = None
         voice_listener = None
         hands = None
+
+        self.emitter.emit("engine.status", {"running": True, "phase": "loading_modules"})
         try:
+            # these should be fast if preloading finished
             import cv2
             import mediapipe as mp
-        except Exception as exc:
-            self._set_error("imports", exc)
-            self._running = False
-            return
-
-        try:
-            cv2.setUseOptimized(True)
-        except Exception:
-            pass
-
-        try:
+            
             from dynamic_engine.drs_gesture import detect_drs
             from dynamic_engine.family_detector import DynamicFamilyDetector
             from intent_engine.context_engine.intent_adapter import cycle_override, get_active_intent
@@ -597,15 +728,17 @@ class RuntimeEngine:
             from intent_engine.mode_manager import get_mode
             from intent_engine.stability_filter import stable_gesture
             from ml_engine.feature_extraction import extract_features
-            from ml_engine.static_runtime import init_static_model, run_static_inference
+            from ml_engine.static_runtime import init_static_model, run_static_inference, _load_label_map
             from screen_engine.screen_capture import capture_resized
             from screen_engine.semantic_extractor import extract_semantic_features
             from voice_engine.vosk_listener import VoskVoiceListener
+            
         except Exception as exc:
             self._set_error("module_load", exc)
             self._running = False
             return
 
+        self.emitter.emit("engine.status", {"running": True, "phase": "initializing_models"})
         family_detector = DynamicFamilyDetector()
         base_dir = os.path.dirname(os.path.abspath(__file__))
         data_root = os.environ.get("OCTAVE_DATA_DIR", "").strip() or base_dir
@@ -632,15 +765,7 @@ class RuntimeEngine:
             else template_voice_model_path
         )
 
-        def _load_label_map():
-            try:
-                with open(label_map_path, "r", encoding="utf-8") as fh:
-                    data = json.load(fh)
-                return {str(k): str(v) for k, v in data.items()}
-            except Exception:
-                return {}
-
-        label_map = _load_label_map()
+        label_map = _load_label_map(force=True)
         if label_map and os.path.exists(model_path):
             init_static_model(model_path, 63, len(label_map))
 
@@ -652,12 +777,28 @@ class RuntimeEngine:
             min_tracking_confidence=float(get_setting("hand_min_tracking_confidence", 0.55))
         )
 
+        self.emitter.emit("engine.status", {"running": True, "phase": "opening_camera"})
         camera_index_raw = get_setting("camera_index", 0)
         try:
             camera_index = int(camera_index_raw)
         except Exception:
             camera_index = 0
-        cap = cv2.VideoCapture(camera_index)
+
+        # On Windows use DirectShow (CAP_DSHOW) — it opens in <1s.
+        # MSMF (the default) negotiates codecs and can take 3-10s.
+        cap = None
+        t_cam = time.time()
+
+        if sys.platform == "win32":
+            cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap.release()
+                cap = cv2.VideoCapture(camera_index)  # fallback to default
+        else:
+            cap = cv2.VideoCapture(camera_index)
+
+        print(f"[Profile] Camera opened in {time.time() - t_cam:.3f}s", flush=True)
+
         if not cap.isOpened():
             self._set_error("camera_open", f"Unable to open camera index {camera_index}")
             self._running = False
@@ -667,8 +808,11 @@ class RuntimeEngine:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
             pass
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(get_setting("camera_width", 960)))
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(get_setting("camera_height", 540)))
+
+        # Use a smaller resolution for faster frame negotiation.
+        # The user-configured size is applied after the first frame is read.
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(get_setting("camera_width", 640)))
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(get_setting("camera_height", 480)))
 
         sem_interval = float(get_setting("semantic_interval_sec", 0.4))
         state_interval = float(get_setting("runtime_state_interval_sec", 0.2))
@@ -689,6 +833,7 @@ class RuntimeEngine:
         fps = 0.0
 
         try:
+            self.emitter.emit("engine.status", {"running": True, "phase": "starting_voice"})
             voice_listener = VoskVoiceListener(vosk_model_path)
             voice_listener.start()
         except Exception as exc:
@@ -697,6 +842,10 @@ class RuntimeEngine:
 
         append_engine_event("engine_started", {"voice_model_path": vosk_model_path})
         self.emitter.emit("engine.status", {"running": True, "phase": "active"})
+        self._startup_ok = True
+        self._startup_event.set()
+
+
 
         try:
             while not self._stop_event.is_set():
@@ -717,16 +866,20 @@ class RuntimeEngine:
                     current_model_mtime = (
                         os.path.getmtime(model_path) if os.path.exists(model_path) else 0.0
                     )
-                    if current_label_mtime != last_label_mtime:
+
+                    # Reload if EITHER changed to avoid mismatch (e.g. map updated but model old)
+                    if (
+                        current_label_mtime != last_label_mtime 
+                        or current_model_mtime != last_model_mtime
+                    ):
                         label_map = _load_label_map()
                         last_label_mtime = current_label_mtime
-                    if (
-                        current_model_mtime != last_model_mtime
-                        and label_map
-                        and os.path.exists(model_path)
-                    ):
-                        init_static_model(model_path, 63, len(label_map))
+                        
+                        if label_map and os.path.exists(model_path):
+                            # This will fail safely (model=None) if shapes mismatch
+                            init_static_model(model_path, 63, len(label_map))
                         last_model_mtime = current_model_mtime
+                    
                     last_reload_t = now_t
 
                 if now_t - last_semantic_t >= sem_interval:
@@ -739,12 +892,14 @@ class RuntimeEngine:
 
                 voice_event = voice_listener.poll_event() if voice_listener else None
                 if voice_event:
-                    executed = execute_custom_action(voice_event.get("action"))
+                    voice_action = _normalize_action(voice_event.get("action"))
+                    executed = execute_custom_action(voice_action)
                     last_voice_phrase = voice_event.get("phrase")
                     self.emitter.emit(
                         "engine.voice",
                         {
                             "phrase": voice_event.get("phrase"),
+                            "action": voice_action,
                             "executed": bool(executed)
                         }
                     )
@@ -814,10 +969,13 @@ class RuntimeEngine:
                     
                     # Add overlays
                     cv2.putText(annotated_frame, f"Mode: {get_mode()}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    if last_static:
+                         cv2.putText(annotated_frame, f"Gesture: {last_static}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                     if last_family:
-                         cv2.putText(annotated_frame, f"Family: {last_family}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                         cv2.putText(annotated_frame, f"Family: {last_family}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
                     if last_intent:
-                        cv2.putText(annotated_frame, f"Intent: {last_intent} ({last_conf:.2f})", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                        cv2.putText(annotated_frame, f"Intent: {last_intent} ({last_conf:.2f})", (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
 
                     ret, jpeg = cv2.imencode('.jpg', annotated_frame)
                     if ret and hasattr(self, 'stream_callback') and self.stream_callback:
@@ -867,6 +1025,8 @@ class RuntimeEngine:
                 self._last_state["running"] = False
             append_engine_event("engine_stopped", {})
             self.emitter.emit("engine.status", {"running": False, "phase": "stopped"})
+            self._startup_event.set()
+            self._stop_complete_event.set()
 
 
 
@@ -954,16 +1114,30 @@ class EngineService:
                 return
 
             if cmd == "engine.start":
-                self.runtime.start()
+                if self.runtime.is_running():
+                    self._ack(
+                        request_id,
+                        {"running": True, "phase": self.runtime.get_state().get("phase", "active")}
+                    )
+                    return
+
+                started = self.runtime.start()
                 self._ack(
                     request_id,
-                    {"running": self.runtime.is_running(), "lastError": self.runtime.last_error()}
+                    {
+                        "running": bool(started),
+                        "phase": "starting" if started else "error",
+                        "lastError": self.runtime.last_error()
+                    }
                 )
                 return
 
             if cmd == "engine.stop":
-                self.runtime.stop()
-                self._ack(request_id, {"running": self.runtime.is_running()})
+                stopped = self.runtime.stop()
+                self._ack(
+                    request_id,
+                    {"running": False if stopped else self.runtime.is_running(), "stopped": bool(stopped)}
+                )
                 return
 
             if cmd == "engine.get_state":
@@ -999,27 +1173,177 @@ class EngineService:
                 self._ack(request_id, {"saved": True, "mapping": saved})
                 return
 
+            if cmd == "gestures.list":
+                from ml_engine.gesture_manager import list_gestures
+
+                rows = list_gestures()
+                gestures = [{"label": label, "name": name} for label, name in rows]
+                self._ack(
+                    request_id,
+                    {
+                        "gestures": gestures,
+                        "mapping": load_gesture_mapping(force=True)
+                    }
+                )
+                return
+
+            if cmd in {"gesture.update", "gestures.rename"}:
+                gesture_type = "voice" if str(payload.get("type")).strip().lower() == "voice" else "hand"
+                action = self.training._default_action_from_payload(payload, gesture_type)
+
+                if gesture_type == "voice":
+                    from ml_engine.gesture_manager import delete_voice_action, set_voice_action
+
+                    phrase = str(payload.get("phrase") or "").strip().lower()
+                    old_phrase = str(payload.get("oldPhrase") or phrase).strip().lower()
+                    if not phrase:
+                        self._nack(request_id, "Voice gesture update requires a phrase")
+                        return
+                    if old_phrase and old_phrase != phrase:
+                        delete_voice_action(old_phrase)
+                    set_voice_action(phrase, action)
+                    self._ack(
+                        request_id,
+                        {
+                            "updated": True,
+                            "type": gesture_type,
+                            "phrase": phrase,
+                            "action": action,
+                            "mapping": load_gesture_mapping(force=True)
+                        }
+                    )
+                    return
+
+                from ml_engine.gesture_manager import delete_static_action, rename_gesture, set_static_action
+
+                key = payload.get("label")
+                old_name = str(
+                    payload.get("oldName") or payload.get("gestureName") or payload.get("name") or ""
+                ).strip()
+                if key is None:
+                    key = old_name
+                new_name = str(payload.get("newName") or payload.get("title") or key or "").strip()
+                if key is None or not new_name:
+                    self._nack(request_id, "Gesture update requires a source gesture and newName")
+                    return
+
+                compare_name = old_name or str(key).strip()
+                updated_label = rename_gesture(key, new_name) if compare_name != new_name else key
+                if compare_name != new_name:
+                    delete_static_action(compare_name)
+                set_static_action(new_name, action)
+                self._ack(
+                    request_id,
+                    {
+                        "updated": True,
+                        "type": gesture_type,
+                        "label": updated_label,
+                        "gestureName": new_name,
+                        "action": action,
+                        "mapping": load_gesture_mapping(force=True)
+                    }
+                )
+                return
+
+            if cmd in {"gesture.delete", "gestures.delete"}:
+                gesture_type = "voice" if str(payload.get("type")).strip().lower() == "voice" else "hand"
+
+                if gesture_type == "voice":
+                    from ml_engine.gesture_manager import delete_voice_action
+
+                    phrase = str(payload.get("phrase") or "").strip().lower()
+                    if not phrase:
+                        self._nack(request_id, "Voice gesture delete requires a phrase")
+                        return
+                    delete_voice_action(phrase)
+                    self._ack(
+                        request_id,
+                        {
+                            "deleted": True,
+                            "type": gesture_type,
+                            "phrase": phrase,
+                            "mapping": load_gesture_mapping(force=True)
+                        }
+                    )
+                    return
+
+                from ml_engine.gesture_manager import (
+                    delete_gesture,
+                    delete_static_action,
+                    list_gestures,
+                    retrain_static_model
+                )
+
+                gesture_name = payload.get("gestureName") or payload.get("name")
+                key = payload.get("label")
+                if key is None:
+                    key = gesture_name
+                if key is None:
+                    self._nack(request_id, "Gesture delete requires a source gesture")
+                    return
+
+                deleted_label = delete_gesture(key)
+                if gesture_name:
+                    delete_static_action(gesture_name)
+
+                model_path = _static_model_path()
+                try:
+                    if list_gestures():
+                        retrain_static_model()
+                    elif os.path.exists(model_path):
+                        os.remove(model_path)
+                except (FileNotFoundError, ValueError):
+                    if os.path.exists(model_path):
+                        os.remove(model_path)
+
+                self._ack(
+                    request_id,
+                    {
+                        "deleted": True,
+                        "type": gesture_type,
+                        "label": deleted_label,
+                        "mapping": load_gesture_mapping(force=True)
+                    }
+                )
+                return
+
             if cmd == "training.start":
                 # Stop runtime to free camera resource for training
                 if self.runtime.is_running():
                     self.runtime.stop()
-                    
+
+                self.emitter.emit("engine.status", {"running": False, "phase": "training"})
                 out = self.training.start(payload)
+                out["ok"] = True
                 self._ack(request_id, out)
                 return
 
             if cmd == "training.cancel":
                 ok = self.training.cancel()
                 # Restart runtime for live monitoring
+                self.emitter.emit("engine.status", {"running": False, "phase": "restarting"})
                 self.runtime.start()
                 self._ack(request_id, {"cancelled": bool(ok)})
                 return
 
             if cmd == "training.complete":
-                ok = self.training.complete()
-                # Restart runtime for live monitoring
-                self.runtime.start()
-                self._ack(request_id, {"completed": bool(ok)})
+                current_job = self.training.current()
+                if current_job and not current_job.get("done"):
+                    self._ack(
+                        request_id,
+                        {"completed": False, "reason": "training_in_progress", "running": False}
+                    )
+                    return
+                self.emitter.emit("engine.status", {"running": False, "phase": "restarting"})
+                started = self.runtime.start()
+                self._ack(
+                    request_id,
+                    {
+                        "completed": True,
+                        "running": bool(started),
+                        "lastError": self.runtime.last_error()
+                    }
+                )
                 return
 
             if cmd == "ping":

@@ -54,6 +54,7 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001, pr
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     epochs_run = 0
+    cancelled = False
     for epoch in range(epochs):
         outputs = model(X)
         loss = criterion(outputs, y)
@@ -68,7 +69,18 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001, pr
         if progress_callback is not None:
             should_continue = progress_callback(epoch + 1, epochs, float(loss.item()))
             if should_continue is False:
+                cancelled = True
                 break
+
+    if cancelled:
+        return {
+            "model_path": model_path,
+            "num_classes": num_classes,
+            "rows": len(data),
+            "epochs_run": epochs_run,
+            "cancelled": True,
+            "saved": False
+        }
 
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     torch.save(model.state_dict(), model_path)
@@ -77,7 +89,9 @@ def train_static_model(csv_path=None, model_path=None, epochs=None, lr=0.001, pr
         "model_path": model_path,
         "num_classes": num_classes,
         "rows": len(data),
-        "epochs_run": epochs_run
+        "epochs_run": epochs_run,
+        "cancelled": False,
+        "saved": True
     }
 
 

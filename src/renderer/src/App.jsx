@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
 const TABS = [
   { id: 'gesture-library', label: 'Gesture Library' },
   { id: 'settings', label: 'Settings' }
 ]
+
+let initialEngineStartRequested = false
 
 const DEFAULT_GESTURES = [
   {
@@ -117,6 +119,7 @@ const DEFAULT_GESTURES = [
     id: 'st-fist-play-pause',
     title: 'Closed Fist',
     subtitle: 'Play / Pause',
+    engineGestureName: 'Fist',
     type: 'hand',
     family: 'Static Command Family',
     controlModel: 'static',
@@ -134,6 +137,7 @@ const DEFAULT_GESTURES = [
     id: 'st-thumbs-up-mute',
     title: 'Thumbs Up',
     subtitle: 'Mute / Unmute',
+    engineGestureName: 'Thumb',
     type: 'hand',
     family: 'Static Command Family',
     controlModel: 'static',
@@ -151,6 +155,7 @@ const DEFAULT_GESTURES = [
     id: 'st-v-sign-next-prev',
     title: 'V Sign',
     subtitle: 'Next / Previous',
+    engineGestureName: 'V Sign',
     type: 'hand',
     family: 'Static Command Family',
     controlModel: 'static',
@@ -168,6 +173,7 @@ const DEFAULT_GESTURES = [
     id: 'st-ok-sign-confirm',
     title: 'OK Sign',
     subtitle: 'Confirm / Enter',
+    engineGestureName: 'OK Sign',
     type: 'hand',
     family: 'Static Command Family',
     controlModel: 'static',
@@ -185,6 +191,7 @@ const DEFAULT_GESTURES = [
     id: 'st-mode-switch-cycle',
     title: 'Three-Finger Mode Switch',
     subtitle: 'Hold to Cycle Active Control Mode',
+    engineGestureName: 'Three Fingers',
     type: 'hand',
     family: 'Static Command Family',
     controlModel: 'static',
@@ -203,6 +210,7 @@ const DEFAULT_GESTURES = [
     id: 'st-drs-frame-power',
     title: 'DRS Frame Power Command',
     subtitle: 'Third Umpire Review Signal (Showcase Automation)',
+    engineGestureName: 'DRS T-Frame',
     type: 'hand',
     family: 'Power Command Gesture',
     controlModel: 'static',
@@ -276,7 +284,8 @@ const ADD_GESTURE_SECTIONS = [
         family: 'Dynamic Voice Family',
         templateTitle: 'New Dynamic Voice Gesture',
         templateSubtitle: 'Continuous voice control mapping',
-        phrase: 'Your dynamic command'
+        phrase: 'Your dynamic command',
+        defaultAction: 'Mute/Unmute Audio'
       }
     ]
   },
@@ -295,7 +304,8 @@ const ADD_GESTURE_SECTIONS = [
         controlModel: 'static',
         family: 'Static Command Family',
         templateTitle: 'New Static Gesture',
-        templateSubtitle: 'One-time hand action mapping'
+        templateSubtitle: 'One-time hand action mapping',
+        defaultAction: 'Play/Pause Media'
       },
       {
         id: 'custom-static-voice',
@@ -327,11 +337,143 @@ const ADD_GESTURE_SECTIONS = [
         controlModel: 'static',
         family: 'Power Command Gesture',
         templateTitle: 'New Power Command',
-        templateSubtitle: 'Automation trigger mapping'
+        templateSubtitle: 'Automation trigger mapping',
+        defaultAction: 'Launch VS Code'
       }
     ]
   }
 ]
+
+const AVAILABLE_ACTIONS = [
+  {
+    group: 'Media',
+    actions: [
+      'Play/Pause Media',
+      'Mute/Unmute Audio',
+      'Volume Up',
+      'Volume Down',
+      'Next Track',
+      'Prev Track'
+    ]
+  },
+  {
+    group: 'Navigation',
+    actions: [
+      'Navigate Next/Previous',
+      'Switch Tab',
+      'Switch Window',
+      'Scroll Up',
+      'Scroll Down',
+      'Go Back',
+      'Go Forward'
+    ]
+  },
+  {
+    group: 'System',
+    actions: [
+      'Confirm / Enter',
+      'Escape',
+      'Screenshot',
+      'Lock Screen',
+      'Launch VS Code',
+      'Launch Browser'
+    ]
+  },
+  {
+    group: 'Mouse',
+    actions: ['Click', 'Double Click', 'Right Click', 'Middle Click']
+  }
+]
+
+const ACTION_OPTIONS = AVAILABLE_ACTIONS.flatMap((group) => group.actions)
+
+const UI_ACTION_TO_ENGINE_ACTION = {
+  'Play/Pause Media': 'PlayPause',
+  'Mute/Unmute Audio': 'MuteToggle',
+  'Volume Up': 'VolumeUp',
+  'Volume Down': 'VolumeDown',
+  'Next Track': 'NextTrack',
+  'Prev Track': 'PrevTrack',
+  'Navigate Next/Previous': 'AltRight',
+  'Switch Tab': 'SwitchTab',
+  'Switch Window': 'SwitchWindow',
+  'Scroll Up': 'ScrollUp',
+  'Scroll Down': 'ScrollDown',
+  'Go Back': 'GoBack',
+  'Go Forward': 'AltRight',
+  'Confirm / Enter': 'ConfirmEnter',
+  Escape: 'Escape',
+  Screenshot: 'Screenshot',
+  'Lock Screen': 'LockScreen',
+  'Launch VS Code': 'OpenVSCode',
+  'Launch Browser': 'OpenBrowser',
+  Click: 'Click',
+  'Double Click': 'DoubleClick',
+  'Right Click': 'RightClick',
+  'Middle Click': 'MiddleClick'
+}
+
+const ENGINE_ACTION_TO_UI_ACTION = {
+  PlayPause: 'Play/Pause Media',
+  MuteToggle: 'Mute/Unmute Audio',
+  VolumeUp: 'Volume Up',
+  VolumeDown: 'Volume Down',
+  NextTrack: 'Next Track',
+  PrevTrack: 'Prev Track',
+  AltRight: 'Go Forward',
+  SwitchTab: 'Switch Tab',
+  SwitchWindow: 'Switch Window',
+  ScrollUp: 'Scroll Up',
+  ScrollDown: 'Scroll Down',
+  GoBack: 'Go Back',
+  ConfirmEnter: 'Confirm / Enter',
+  Escape: 'Escape',
+  Screenshot: 'Screenshot',
+  LockScreen: 'Lock Screen',
+  OpenVSCode: 'Launch VS Code',
+  OpenBrowser: 'Launch Browser',
+  Click: 'Click',
+  DoubleClick: 'Double Click',
+  RightClick: 'Right Click',
+  MiddleClick: 'Middle Click'
+}
+
+const UNSUPPORTED_CUSTOM_PRESET_IDS = new Set(['custom-dynamic-hand', 'custom-dynamic-voice'])
+
+const DEFAULT_ENGINE_GESTURES = new Set(
+  DEFAULT_GESTURES.map((gesture) => gesture.engineGestureName).filter(Boolean)
+)
+
+const toEngineAction = (action) => {
+  if (action && typeof action === 'object') return action
+  const normalized = typeof action === 'string' ? action.trim() : ''
+  return UI_ACTION_TO_ENGINE_ACTION[normalized] || normalized || 'Click'
+}
+
+const describeEngineAction = (action) => {
+  if (typeof action === 'string') {
+    return ENGINE_ACTION_TO_UI_ACTION[action] || action || 'Click'
+  }
+  if (!action || typeof action !== 'object') {
+    return 'Click'
+  }
+  const kind = String(action.type || '').toLowerCase()
+  if (kind === 'launch_app') return `Launch ${action.target || 'App'}`
+  if (kind === 'hotkey') return `Hotkey: ${(action.keys || []).join(' + ')}`
+  if (kind === 'key') return `Key: ${action.key || ''}`.trim()
+  if (kind === 'command') return 'Custom Command'
+  if (kind === 'url') return 'Open URL'
+  if (kind === 'open_path') return 'Open Folder'
+  return 'Custom Action'
+}
+
+const buildVoiceGestureTitle = (phrase) =>
+  String(phrase || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Voice Command'
 
 const DEFAULT_SETTINGS = {
   selectedCameraId: '',
@@ -487,8 +629,6 @@ function App() {
   const [selectedGesture, setSelectedGesture] = useState(null)
   const [editingGesture, setEditingGesture] = useState(null)
   const [showAddTypePopup, setShowAddTypePopup] = useState(false)
-  const [showPermissionPopup, setShowPermissionPopup] = useState(false)
-  const [pendingGesturePreset, setPendingGesturePreset] = useState(null)
   const [pendingDeleteGesture, setPendingDeleteGesture] = useState(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [trainingSession, setTrainingSession] = useState(null)
@@ -522,14 +662,18 @@ function App() {
   const [devices, setDevices] = useState({ cameras: [], microphones: [] })
   const [mediaReady, setMediaReady] = useState(false)
   const [startupSupported, setStartupSupported] = useState(true)
+  const [engineStatus, setEngineStatus] = useState({ running: false, phase: 'unknown' })
   const [cameraStatus, setCameraStatus] = useState('idle')
   const [micStatus, setMicStatus] = useState('idle')
   const [micLevel, setMicLevel] = useState(0)
   const [mediaError, setMediaError] = useState('')
+  const [hasStartupPermissions, setHasStartupPermissions] = useState(true)
+  const [gestureSetupForm, setGestureSetupForm] = useState(null) // { preset, name, action, phrase }
   const videoRef = useRef(null)
   const cameraStreamRef = useRef(null)
   const micStreamRef = useRef(null)
   const micFrameRef = useRef(null)
+  const engineStatusRef = useRef(engineStatus)
 
   const notifyUser = async (title, body, force = false) => {
     if (!force && !settings.notifications) return
@@ -541,6 +685,187 @@ function App() {
       // desktop notification is optional
     }
   }
+
+  const notifyFromEffect = useEffectEvent((title, body, force = false) => {
+    void notifyUser(title, body, force)
+  })
+
+  const isEngineOwningInputs = (status = engineStatusRef.current) => {
+    const phase = status?.phase
+    return Boolean(status?.running) || ['training', 'restarting', 'active'].includes(phase)
+  }
+
+  const stopCameraPreview = () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop())
+    cameraStreamRef.current = null
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+  }
+
+  const stopMicPreview = () => {
+    if (micFrameRef.current) cancelAnimationFrame(micFrameRef.current)
+    micFrameRef.current = null
+    micStreamRef.current?.getTracks().forEach((track) => track.stop())
+    micStreamRef.current = null
+    setMicLevel(0)
+  }
+
+  const syncGestureLibraryFromEngine = async () => {
+    if (!window.api?.listGestures) return
+    try {
+      const result = await window.api.listGestures()
+      if (!result || result.ok === false) return
+
+      const mapping = result.mapping || {}
+      const disabledStatic = new Set(mapping.disabled_static || [])
+      const baseGestures = cloneDefaultGestures().map((gesture) =>
+        gesture.engineGestureName
+          ? { ...gesture, enabled: !disabledStatic.has(gesture.engineGestureName) }
+          : gesture
+      )
+
+      const customHandGestures = (result.gestures || [])
+        .filter((gesture) => !DEFAULT_ENGINE_GESTURES.has(gesture.name))
+        .map((gesture) => {
+          const engineAction = mapping.static_actions?.[gesture.name] || 'Click'
+          const actionLabel = describeEngineAction(engineAction)
+          return {
+            id: `hand-${gesture.label}`,
+            label: gesture.label,
+            title: gesture.name,
+            subtitle: actionLabel,
+            engineGestureName: gesture.name,
+            engineAction,
+            defaultAction: actionLabel,
+            type: 'hand',
+            family: 'Custom Static Gesture',
+            controlModel: 'static',
+            enabled: true,
+            locked: false
+          }
+        })
+
+      const customVoiceGestures = Object.entries(mapping.voice_actions || {}).map(
+        ([phrase, engineAction]) => {
+          const actionLabel = describeEngineAction(engineAction)
+          return {
+            id: `voice-${phrase.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            title: buildVoiceGestureTitle(phrase),
+            subtitle: actionLabel,
+            engineAction,
+            defaultAction: actionLabel,
+            phrase,
+            type: 'voice',
+            family: 'Static Command Voice Family',
+            controlModel: 'static',
+            enabled: true,
+            locked: false
+          }
+        }
+      )
+
+      setGestures([...customVoiceGestures, ...customHandGestures, ...baseGestures])
+    } catch (error) {
+      console.error('Failed to sync gestures from engine:', error)
+    }
+  }
+
+  const persistDisabledStaticGestures = async (nextGestures) => {
+    if (!window.api?.updateMapping) return
+    const disabledStatic = nextGestures
+      .filter((gesture) => gesture.locked && gesture.engineGestureName && gesture.enabled === false)
+      .map((gesture) => gesture.engineGestureName)
+    try {
+      await window.api.updateMapping({ disabled_static: disabledStatic })
+    } catch (error) {
+      console.error('Failed to persist disabled gestures:', error)
+    }
+  }
+
+  useEffect(() => {
+    if (!window.api?.onEngineStatus) return
+    const unsubStatus = window.api.onEngineStatus((payload) => {
+      console.log('[App] Received engine status update:', payload)
+      setEngineStatus((prev) => {
+        console.log('[App] updating engineStatus from', prev, 'to', { ...prev, ...payload })
+        const next = { ...prev, ...payload }
+        engineStatusRef.current = next
+        return next
+      })
+    })
+
+    let unsubError = () => {}
+    if (window.api?.onEngineError) {
+      unsubError = window.api.onEngineError((payload) => {
+        console.error('[App] Engine error received:', payload)
+        const errorMsg = payload.error || 'Unknown engine error'
+        setEngineStatus((prev) => ({ ...prev, running: false, phase: 'error' }))
+        notifyFromEffect('Engine Error', errorMsg, true)
+      })
+    }
+
+    // Fetch initial status if available
+    if (window.api.getEngineStatus) {
+      window.api
+        .getEngineStatus()
+        .then((status) => {
+          if (status) {
+            setEngineStatus((prev) => {
+              const next = { ...prev, ...status }
+              engineStatusRef.current = next
+              return next
+            })
+          }
+        })
+        .catch(() => {
+          // failed to get initial status
+        })
+    }
+
+    return () => {
+      unsubStatus()
+      unsubError()
+    }
+  }, [])
+
+  // ... (keeping other effects unchanged)
+
+  useEffect(() => {
+    // Startup: start engine immediately. Electron handles permissions natively.
+    // Device enumeration is handled by the dedicated setup effect below — do NOT
+    // call enumerateMediaDevices() here too or it fires twice, triggering two
+    // selectedCameraId updates and two camera stream restarts.
+    if (initialEngineStartRequested) return
+    initialEngineStartRequested = true
+
+    const startAppEngine = async () => {
+      setHasStartupPermissions(true)
+
+      if (!window.api?.startEngine) {
+        console.error('[App] window.api.startEngine is missing')
+        return
+      }
+
+      setEngineStatus((prev) => ({ ...prev, phase: 'starting' }))
+      try {
+        const result = await window.api.startEngine()
+        if (result && result.ok === false) {
+          const err = result.error || 'Failed to start engine'
+          console.error('[App] Engine start failed:', err)
+          setEngineStatus((prev) => ({ ...prev, running: false, phase: 'error' }))
+        }
+      } catch (engineErr) {
+        console.error('[App] Engine start exception:', engineErr)
+        setEngineStatus((prev) => ({ ...prev, running: false, phase: 'error' }))
+      }
+    }
+    void startAppEngine()
+  }, [])
+
+  useEffect(() => {
+    void syncGestureLibraryFromEngine()
+  }, [])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
@@ -591,21 +916,31 @@ function App() {
   }, [])
 
   const enumerateMediaDevices = async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return
+    if (!navigator.mediaDevices?.enumerateDevices) return { cameras: [], microphones: [] }
     const list = await navigator.mediaDevices.enumerateDevices()
     const cameras = list.filter((d) => d.kind === 'videoinput')
     const microphones = list.filter((d) => d.kind === 'audioinput')
     setDevices({ cameras, microphones })
+    setMediaReady(cameras.length > 0 || microphones.length > 0)
     setSettings((prev) => ({
       ...prev,
       selectedCameraId: prev.selectedCameraId || cameras[0]?.deviceId || '',
       selectedMicId: prev.selectedMicId || microphones[0]?.deviceId || ''
     }))
+    return { cameras, microphones }
   }
 
   const requestDeviceAccess = async (mode = 'both') => {
+    const shouldRestartEngine =
+      isEngineOwningInputs() && engineStatusRef.current?.phase !== 'training'
     try {
       setMediaError('')
+      if (engineStatusRef.current?.phase === 'training') {
+        throw new Error('Wait for training to finish before refreshing devices.')
+      }
+      if (shouldRestartEngine && window.api?.stopEngine) {
+        await window.api.stopEngine()
+      }
       const constraints =
         mode === 'video'
           ? { video: true, audio: false }
@@ -622,6 +957,12 @@ function App() {
       setMediaError(message)
       void notifyUser('Device access failed', message, true)
       return false
+    } finally {
+      if (shouldRestartEngine && window.api?.startEngine) {
+        await window.api.startEngine().catch((error) => {
+          console.error('Failed to restart engine after device refresh:', error)
+        })
+      }
     }
   }
 
@@ -630,8 +971,8 @@ function App() {
     const setup = async () => {
       try {
         if (!navigator.mediaDevices) return
-        await enumerateMediaDevices()
-        if (mounted && (devices.cameras.length > 0 || devices.microphones.length > 0)) {
+        const foundDevices = await enumerateMediaDevices()
+        if (mounted && (foundDevices.cameras.length > 0 || foundDevices.microphones.length > 0)) {
           setMediaReady(true)
         }
         navigator.mediaDevices.addEventListener?.('devicechange', enumerateMediaDevices)
@@ -644,14 +985,88 @@ function App() {
       mounted = false
       navigator.mediaDevices?.removeEventListener?.('devicechange', enumerateMediaDevices)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    const videoElement = videoRef.current
+    if (!window.api?.updateSettings) return
+    // Only sync if we have devices enumerated, to avoid sending -1/default unintentionally
+    if (devices.cameras.length === 0 && devices.microphones.length === 0) return
 
-    const startCamera = async () => {
-      if (tab !== 'live-monitoring' || !settings.selectedCameraId) return
+    const camIndex = devices.cameras.findIndex((c) => c.deviceId === settings.selectedCameraId)
+    const micIndex = devices.microphones.findIndex((m) => m.deviceId === settings.selectedMicId)
+
+    // Map gestureSensitivity (10-100) to min_detection_confidence (0.5-0.95)
+    // High sensitivity = Low confidence threshold
+    const sensitivity = Math.max(10, Math.min(100, settings.gestureSensitivity))
+    const minConf = 0.5 + (100 - sensitivity) / 200.0
+
+    const payload = {
+      camera_index: camIndex >= 0 ? camIndex : 0,
+      voice_input_index: micIndex >= 0 ? micIndex : -1,
+      hand_min_detection_confidence: minConf,
+      voice_phrase_cooldown_sec: settings.actionCooldownMs / 1000.0,
+      notifications: settings.notifications
+    }
+
+    window.api.updateSettings(payload).catch((err) => {
+      console.error('Failed to update settings:', err)
+    })
+  }, [settings, devices])
+
+  const engineOwnsMedia =
+    Boolean(trainingSession) ||
+    Boolean(engineStatus?.running) ||
+    [
+      'training',
+      'restarting',
+      'loading_modules',
+      'initializing_models',
+      'opening_camera',
+      'starting_voice'
+    ].includes(engineStatus?.phase)
+
+  // ── Camera status sync (reads engineStatus, never touches the media stream) ──
+  useEffect(() => {
+    const phase = engineStatus?.phase
+    const isRunning = engineStatus?.running
+    if (isRunning || phase === 'active') {
+      setCameraStatus('connected (engine)')
+      setMicStatus('connected (engine)')
+    } else if (phase === 'training') {
+      setCameraStatus('training')
+      setMicStatus('training')
+    } else if (phase === 'restarting') {
+      setCameraStatus((prev) => (prev === 'training' ? 'idle' : prev))
+      setMicStatus((prev) => (prev === 'training' ? 'idle' : prev))
+    } else if (phase === 'stopped' || phase === 'error') {
+      setCameraStatus((prev) =>
+        prev === 'connected (engine)' || prev === 'training' ? 'idle' : prev
+      )
+      setMicStatus((prev) => (prev === 'connected (engine)' || prev === 'training' ? 'idle' : prev))
+    }
+  }, [engineStatus])
+
+  // ── Camera stream (getUserMedia for live-monitoring preview) ──
+  // NOTE: engineStatus is intentionally NOT in the dep array.
+  // Status sync is handled by the effect above; we only want to
+  // (re)start the stream when the selected device or active tab changes.
+  // Including engineStatus would restart/stop the stream on every phase
+  // event (starting → loading_modules → active …) causing the visible
+  // connect/disconnect cycle.
+  useEffect(() => {
+    const videoElement = videoRef.current
+    let cancelled = false
+
+    // Short debounce so rapid selectedCameraId changes (e.g. from two quick
+    // enumerateDevices calls on mount) settle before we open the stream.
+    const timer = setTimeout(async () => {
+      if (cancelled) return
+      if (tab !== 'live-monitoring' || !settings.selectedCameraId || engineOwnsMedia) return
+
+      // If the engine is already running, it owns the camera — skip getUserMedia.
+      // We read engineStatus via the closure so this doesn't become a dep.
+      if (engineOwnsMedia) return
+
       try {
         setCameraStatus('connecting')
         cameraStreamRef.current?.getTracks().forEach((t) => t.stop())
@@ -659,28 +1074,32 @@ function App() {
           video: { deviceId: { exact: settings.selectedCameraId } },
           audio: false
         })
-        cameraStreamRef.current = stream
-        if (videoElement) {
-          videoElement.srcObject = stream
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
         }
+        cameraStreamRef.current = stream
+        if (videoElement) videoElement.srcObject = stream
         setCameraStatus('connected')
       } catch (error) {
-        setCameraStatus('error')
-        setMediaError(error?.message || 'Camera stream unavailable.')
+        if (!cancelled) {
+          setCameraStatus('error')
+          setMediaError(error?.message || 'Camera stream unavailable.')
+        }
       }
-    }
-    startCamera()
+    }, 300)
+
     return () => {
-      cameraStreamRef.current?.getTracks().forEach((t) => t.stop())
-      cameraStreamRef.current = null
-      if (videoElement) videoElement.srcObject = null
+      cancelled = true
+      clearTimeout(timer)
+      stopCameraPreview()
     }
-  }, [tab, settings.selectedCameraId])
+  }, [tab, settings.selectedCameraId, engineOwnsMedia])
 
   useEffect(() => {
     let audioContext = null
     const startMicLevel = async () => {
-      if (tab !== 'live-monitoring' || !settings.selectedMicId) return
+      if (tab !== 'live-monitoring' || !settings.selectedMicId || engineOwnsMedia) return
       try {
         setMicStatus('connecting')
         micStreamRef.current?.getTracks().forEach((t) => t.stop())
@@ -716,16 +1135,12 @@ function App() {
     }
     startMicLevel()
     return () => {
-      if (micFrameRef.current) cancelAnimationFrame(micFrameRef.current)
-      micFrameRef.current = null
-      micStreamRef.current?.getTracks().forEach((t) => t.stop())
-      micStreamRef.current = null
+      stopMicPreview()
       if (audioContext) {
         void audioContext.close().catch(() => {})
       }
-      setMicLevel(0)
     }
-  }, [tab, settings.selectedMicId])
+  }, [tab, settings.selectedMicId, engineOwnsMedia])
 
   const showSearch = tab === 'gesture-library' || tab === 'settings'
 
@@ -773,12 +1188,23 @@ function App() {
     return { label: 'Finalizing', detail: 'Preparing command mapping' }
   }, [trainingSession])
 
+  // NOTE: Startup engine launch is handled by the first useEffect above.
+
   useEffect(() => {
     if (!window.api?.onTrainingProgress) return
     const unsubscribe = window.api.onTrainingProgress((payload = {}) => {
+      if (payload.cancelled) {
+        if (payload.gestureId) {
+          setGestures((prev) => prev.filter((gesture) => gesture.id !== payload.gestureId))
+        }
+        void syncGestureLibraryFromEngine()
+        setTrainingSession(null)
+        return
+      }
+
       setTrainingSession((prev) => {
         if (!prev) return prev
-        if (payload.cancelled) return null
+        // Ignore events for other sessions
         if (payload.sessionId && prev.sessionId && payload.sessionId !== prev.sessionId) {
           return prev
         }
@@ -786,14 +1212,36 @@ function App() {
           return prev
         }
 
+        if (payload.failed || payload.error) {
+          if (payload.gestureId) {
+            setGestures((items) => items.filter((gesture) => gesture.id !== payload.gestureId))
+          }
+          notifyFromEffect('Training Failed', payload.error || 'Training failed', true)
+          if (window.api?.completeTraining) {
+            void window.api.completeTraining()
+          }
+          void syncGestureLibraryFromEngine()
+          return null
+        }
+
         const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
-        return {
+        const updated = {
           ...prev,
           sessionId: payload.sessionId || prev.sessionId || null,
           source: 'engine',
           progress: nextProgress,
-          cueIndex: getCueIndexFromProgress(prev.type, nextProgress)
+          cueIndex: getCueIndexFromProgress(prev.type, nextProgress),
+          stats: payload.result || {}
         }
+
+        if (payload.done && nextProgress >= 100) {
+          if (window.api?.completeTraining) {
+            void window.api.completeTraining()
+          }
+          void syncGestureLibraryFromEngine()
+        }
+
+        return updated
       })
     })
 
@@ -801,6 +1249,22 @@ function App() {
       if (typeof unsubscribe === 'function') {
         unsubscribe()
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!window.api?.onEngineVoice) return
+    const unsubscribe = window.api.onEngineVoice((payload = {}) => {
+      if (payload.executed && payload.action) {
+        notifyFromEffect(
+          'Voice Command',
+          `Executed: ${describeEngineAction(payload.action)}`,
+          false
+        )
+      }
+    })
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [])
 
@@ -856,19 +1320,51 @@ function App() {
   ])
 
   const systemStatus = useMemo(() => {
-    if (mediaError) return { label: 'System Error', tone: 'error' }
+    const phase = engineStatus?.phase
+
+    // Error states always take precedence
+    if (phase === 'error') return { label: 'Engine Error', tone: 'error' }
+    if (mediaError && !engineStatus?.running) return { label: 'System Error', tone: 'error' }
+
+    // Granular startup phases — must be checked BEFORE the generic running check
+    if (phase === 'loading_modules') return { label: 'Loading AI Modules...', tone: 'starting' }
+    if (phase === 'initializing_models')
+      return { label: 'Initializing Models...', tone: 'starting' }
+    if (phase === 'opening_camera') return { label: 'Connecting Camera...', tone: 'starting' }
+    if (phase === 'starting_voice') return { label: 'Starting Voice Engine...', tone: 'starting' }
+    if (phase === 'starting') return { label: 'Starting Engine...', tone: 'starting' }
+    if (phase === 'restarting') return { label: 'Restarting Engine...', tone: 'starting' }
+
+    // Training in progress (runtime is stopped; training owns camera)
+    if (phase === 'training' || trainingSession) {
+      if (trainingSession?.progress >= 100) return { label: 'Training Complete', tone: 'active' }
+      return { label: 'Training in Progress...', tone: 'starting' }
+    }
+
+    // Engine fully active
+    if (engineStatus?.running || phase === 'active') {
+      if (mediaError) return { label: 'Engine Active (Input Error)', tone: 'error' }
+      return { label: 'Engine Active', tone: 'active' }
+    }
+
+    // Non-engine states (engine stopped, using browser media)
     if (tab === 'live-monitoring') {
       if (cameraStatus === 'connecting' || micStatus === 'connecting') {
-        return { label: 'Starting...', tone: 'starting' }
+        return { label: 'Connecting Input...', tone: 'starting' }
       }
-      if (cameraStatus === 'connected' || micStatus === 'connected') {
-        return { label: 'System Active', tone: 'active' }
+      if (
+        cameraStatus === 'connected' ||
+        cameraStatus === 'connected (engine)' ||
+        micStatus === 'connected'
+      ) {
+        return { label: 'Input Connected', tone: 'active' }
       }
     }
-    return { label: 'System Idle', tone: 'idle' }
-  }, [cameraStatus, mediaError, micStatus, tab])
 
-  const handleEditSave = () => {
+    return { label: 'System Idle', tone: 'idle' }
+  }, [cameraStatus, mediaError, micStatus, tab, engineStatus, trainingSession])
+
+  const handleEditSave = async () => {
     if (!editingGesture) return
     if (editingGesture.locked) {
       setEditingGesture(null)
@@ -877,20 +1373,70 @@ function App() {
     const title = editingGesture.title.trim()
     const subtitle = editingGesture.subtitle.trim()
     if (!title || !subtitle) return
-    setGestures((prev) =>
-      prev.map((item) => (item.id === editingGesture.id ? { ...item, title, subtitle } : item))
+    const nextGesture = {
+      ...editingGesture,
+      title,
+      subtitle,
+      defaultAction: subtitle,
+      engineAction: toEngineAction(subtitle),
+      engineGestureName: editingGesture.type === 'hand' ? title : editingGesture.engineGestureName
+    }
+    const nextGestures = gestures.map((item) =>
+      item.id === editingGesture.id ? nextGesture : item
     )
-    void notifyUser('Gesture updated', `${title} mapping has been saved.`)
-    setEditingGesture(null)
+
+    try {
+      if (window.api?.updateGesture) {
+        const updateResult = await window.api.updateGesture({
+          type: editingGesture.type,
+          oldName: editingGesture.engineGestureName || editingGesture.title,
+          newName: title,
+          oldPhrase: editingGesture.phrase,
+          phrase: nextGesture.phrase,
+          action: nextGesture.engineAction
+        })
+        if (updateResult?.ok === false) {
+          throw new Error(updateResult.error || 'Failed to update gesture')
+        }
+      }
+
+      setGestures(nextGestures)
+      void syncGestureLibraryFromEngine()
+      void notifyUser('Gesture updated', `${title} mapping has been saved.`)
+      setEditingGesture(null)
+    } catch (error) {
+      void notifyUser('Gesture update failed', error?.message || 'Please try again.', true)
+    }
   }
 
-  const handleDeleteConfirmed = (id) => {
+  const handleDeleteConfirmed = async (id) => {
     const removed = gestures.find((item) => item.id === id)
     if (removed?.locked) {
       setPendingDeleteGesture(null)
       return
     }
-    setGestures((prev) => prev.filter((item) => item.id !== id))
+    const nextGestures = gestures.filter((item) => item.id !== id)
+    try {
+      if (removed && window.api?.deleteGesture) {
+        const result = await window.api.deleteGesture({
+          type: removed.type,
+          label: removed.label,
+          gestureName: removed.engineGestureName || removed.title,
+          phrase: removed.phrase
+        })
+        if (result?.ok === false) {
+          throw new Error(result.error || 'Failed to delete gesture')
+        }
+      }
+
+      setGestures(nextGestures)
+      void syncGestureLibraryFromEngine()
+    } catch (error) {
+      void notifyUser('Gesture delete failed', error?.message || 'Please try again.', true)
+      setPendingDeleteGesture(null)
+      return
+    }
+
     if (selectedGesture?.id === id) setSelectedGesture(null)
     setPendingDeleteGesture(null)
     if (removed) {
@@ -899,25 +1445,31 @@ function App() {
   }
 
   const handleToggleDefaultGesture = (id) => {
-    setGestures((prev) =>
-      prev.map((item) =>
-        item.id === id && item.locked ? { ...item, enabled: item.enabled === false } : item
-      )
+    const nextGestures = gestures.map((item) =>
+      item.id === id && item.locked ? { ...item, enabled: item.enabled === false } : item
     )
+    setGestures(nextGestures)
+    void persistDisabledStaticGestures(nextGestures)
   }
 
   const createGesture = (preset) => {
     if (!preset) return null
     const id = `${preset.id}-${Date.now()}`
+    const actionLabel = preset.defaultAction || preset.templateSubtitle || 'Click'
     const created = {
       id,
       title: preset.templateTitle || 'New Gesture',
-      subtitle: preset.templateSubtitle || 'Custom gesture mapping',
+      subtitle: actionLabel,
       type: preset.type || 'hand',
       controlModel: preset.controlModel || 'static',
       family: preset.family || 'Custom Feature',
+      defaultAction: actionLabel,
+      engineAction: toEngineAction(actionLabel),
       enabled: true,
       locked: false,
+      ...(preset.type === 'hand'
+        ? { engineGestureName: preset.templateTitle || 'New Gesture' }
+        : {}),
       ...(preset.type === 'voice' ? { phrase: preset.phrase || 'Your custom phrase' } : {})
     }
     setGestures((prev) => [created, ...prev])
@@ -927,6 +1479,7 @@ function App() {
 
   const startTrainingSession = async (gesture, returnTab = null) => {
     if (!gesture) return
+
     setTrainingSession({
       gestureId: gesture.id,
       type: gesture.type,
@@ -938,52 +1491,78 @@ function App() {
     })
 
     if (!window.api?.startTraining) {
-      setTrainingSession((prev) => (prev ? { ...prev, source: 'ui-fallback' } : prev))
+      setTrainingSession(null)
+      setGestures((prev) => prev.filter((item) => item.id !== gesture.id))
+      void notifyUser('Training unavailable', 'The training engine is not ready yet.', true)
       return
     }
 
     try {
       const result = await window.api.startTraining({
         gestureId: gesture.id,
-        type: gesture.type
+        gestureName: gesture.title,
+        action: gesture.engineAction || toEngineAction(gesture.defaultAction),
+        type: gesture.type,
+        ...(gesture.type === 'voice' ? { phrase: gesture.phrase } : {}),
+        locked: gesture.locked
       })
-      if (result?.ok) {
-        setTrainingSession((prev) =>
-          prev && prev.gestureId === gesture.id
-            ? { ...prev, sessionId: result.sessionId || null, source: 'engine' }
-            : prev
-        )
-        return
+      // Backend returns { ok, sessionId, gestureId, type } — check sessionId as availability signal
+      if (result?.ok === false) {
+        throw new Error(result.error || 'Training could not be started')
       }
-    } catch {
-      // fall through to ui fallback mode
-    }
 
-    setTrainingSession((prev) => (prev ? { ...prev, source: 'ui-fallback' } : prev))
+      setTrainingSession((prev) =>
+        prev && prev.gestureId === gesture.id
+          ? { ...prev, sessionId: result.sessionId || null, source: 'engine' }
+          : prev
+      )
+    } catch (error) {
+      setTrainingSession(null)
+      setGestures((prev) => prev.filter((item) => item.id !== gesture.id))
+      void notifyUser('Training start failed', error?.message || 'Please try again.', true)
+      if (returnTab) {
+        setTab(returnTab)
+      }
+    }
   }
 
   const handleAddGestureType = (preset) => {
-    setPendingGesturePreset(preset)
-    setShowAddTypePopup(false)
-    setShowPermissionPopup(true)
-  }
-
-  const handleConfirmGestureCreation = async () => {
-    if (!pendingGesturePreset) return
-    const preset = pendingGesturePreset
-    const type = preset.type
-    const granted = await requestDeviceAccess(type === 'voice' ? 'both' : 'video')
-    if (!granted) {
-      setShowPermissionPopup(false)
-      setPendingGesturePreset(null)
+    if (UNSUPPORTED_CUSTOM_PRESET_IDS.has(preset.id)) {
+      void notifyUser(
+        'Dynamic training not ready',
+        'Custom dynamic gesture training is not implemented yet. Use the built-in dynamic families or add a static command instead.',
+        true
+      )
+      setShowAddTypePopup(false)
       return
     }
+
+    // Instead of going straight to permissions, show the setup form
+    setGestureSetupForm({
+      preset,
+      name: preset.templateTitle || 'New Gesture',
+      action: preset.defaultAction || 'Click',
+      phrase: preset.phrase || ''
+    })
+    setShowAddTypePopup(false)
+  }
+
+  const handleStartGestureTraining = async () => {
+    if (!gestureSetupForm) return
+    const { preset, name, action, phrase } = gestureSetupForm
+    setGestureSetupForm(null)
+
+    // Build the gesture using user-provided name and action
+    const enrichedPreset = {
+      ...preset,
+      templateTitle: name.trim() || preset.templateTitle || 'New Gesture',
+      defaultAction: action,
+      ...(preset.type === 'voice' ? { phrase: phrase.trim() || 'your command' } : {})
+    }
     const returnTab = settings.openMonitoringAfterAdd ? null : tab
-    const created = createGesture(preset)
+    const created = createGesture(enrichedPreset)
     setTab('live-monitoring')
     await startTrainingSession(created, returnTab)
-    setShowPermissionPopup(false)
-    setPendingGesturePreset(null)
   }
 
   const finishTrainingSession = () => {
@@ -1034,6 +1613,21 @@ function App() {
     } catch {
       setSettings((prev) => ({ ...prev, launchOnStartup: false }))
       void notifyUser('Startup update failed', 'Could not update launch on startup.', true)
+    }
+  }
+
+  const handleRestartEngine = async () => {
+    if (!window.api?.stopEngine || !window.api?.startEngine) return
+    try {
+      await notifyUser('Restarting Engine', 'Stopping background service...', true)
+      await window.api.stopEngine()
+      // Brief pause to ensure port release
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await window.api.startEngine()
+      await notifyUser('Engine Restarted', 'Background service is active.', true)
+    } catch (error) {
+      console.error('Failed to restart engine:', error)
+      await notifyUser('Restart Failed', error?.message || 'Unknown error', true)
     }
   }
 
@@ -1306,8 +1900,76 @@ function App() {
     event.preventDefault()
   }
 
+  if (!hasStartupPermissions) {
+    return (
+      <div className="app-shell startup-shell">
+        <section className="modal-card">
+          <div className="brand" style={{ justifyContent: 'center', marginBottom: '1.5rem' }}>
+            <span className="brand-logo" style={{ width: 64, height: 64 }}>
+              <BrandLogo />
+            </span>
+          </div>
+          <h2 style={{ textAlign: 'center', marginBottom: '1rem' }}>Welcome to Octave</h2>
+          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: '2rem' }}>
+            To enable gesture control and voice commands, Octave needs access to your camera and
+            microphone.
+          </p>
+          <div className="modal-actions" style={{ justifyContent: 'center' }}>
+            <button
+              className="primary-btn"
+              type="button"
+              style={{ fontSize: '1.1rem', padding: '0.8rem 2rem' }}
+              onClick={async () => {
+                const granted = await requestDeviceAccess('both')
+                if (granted) {
+                  setHasStartupPermissions(true)
+                  if (window.api?.startEngine) {
+                    void notifyUser('Starting Engine', 'Initializing gesture recognition...', false)
+                    try {
+                      const result = await window.api.startEngine()
+                      if (result && result.ok !== false) {
+                        void notifyUser('Engine Active', 'Gesture control is ready.', false)
+                      } else {
+                        void notifyUser(
+                          'Engine Error',
+                          result.error || 'Failed to start engine',
+                          true
+                        )
+                      }
+                    } catch (e) {
+                      void notifyUser('Engine Error', e.message || 'Unknown error', true)
+                    }
+                  }
+                }
+              }}
+            >
+              Grant Access & Start
+            </button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  const isEngineLoading = systemStatus.tone === 'starting' && engineStatus?.phase !== 'training'
+
   return (
     <main className="app-shell" onCopy={handleCopyGuard} onKeyDown={handleKeyDownGuard}>
+      {isEngineLoading && (
+        <div className="app-loading-overlay" aria-live="polite" aria-label="Loading">
+          <div className="app-loading-inner">
+            <span className="app-loading-logo" aria-hidden>
+              <BrandLogo />
+            </span>
+            <p className="app-loading-label">{systemStatus.label}</p>
+            <div className="app-loading-dots" aria-hidden>
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        </div>
+      )}
       <aside className="sidebar">
         <div>
           <div className="brand">
@@ -1336,7 +1998,17 @@ function App() {
 
         <div className="sidebar-foot">
           <span className={`status-dot status-dot--${systemStatus.tone}`} />
-          <span>{systemStatus.label}</span>
+          <span style={{ marginRight: 'auto' }}>{systemStatus.label}</span>
+          {!engineStatus.running && engineStatus.phase !== 'starting' ? (
+            <button
+              className="icon-action"
+              style={{ width: 'auto', padding: '0 0.5rem', fontSize: '0.8rem', height: '24px' }}
+              onClick={() => void handleRestartEngine()}
+              title="Start Engine"
+            >
+              Start
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -1384,7 +2056,7 @@ function App() {
                   type="button"
                   onClick={() => setShowAddTypePopup(true)}
                 >
-                  New Gesture
+                  New Gesture (Beta Testing)
                 </button>
               </>
             ) : null}
@@ -1465,7 +2137,20 @@ function App() {
                 <h3>Camera Input</h3>
                 <p>Status: {cameraStatus}</p>
                 <div className="preview-video-wrap">
-                  <video ref={videoRef} className="preview-video" autoPlay muted playsInline />
+                  {engineOwnsMedia ? (
+                    <img
+                      className="preview-video"
+                      src={
+                        trainingSession
+                          ? 'http://127.0.0.1:5000/training_feed'
+                          : 'http://127.0.0.1:5000/video_feed'
+                      }
+                      alt={trainingSession ? 'Training Stream' : 'Engine Stream'}
+                      style={{ objectFit: 'contain', width: '100%', height: '100%' }}
+                    />
+                  ) : (
+                    <video ref={videoRef} className="preview-video" autoPlay muted playsInline />
+                  )}
                   {trainingSession ? (
                     <div
                       className={`training-focus-frame ${trainingSession.type === 'voice' ? 'voice' : 'hand'}`}
@@ -1499,6 +2184,16 @@ function App() {
                     <div className="training-progress training-progress--overlay">
                       <div style={{ width: `${trainingSession.progress}%` }} />
                     </div>
+                    {trainingSession.stats && trainingSession.stats.epoch ? (
+                      <div className="training-stats-overlay">
+                        <span>
+                          Epoch: {trainingSession.stats.epoch} / {trainingSession.stats.totalEpochs}
+                        </span>
+                        {trainingSession.stats.loss !== undefined ? (
+                          <span>Loss: {Number(trainingSession.stats.loss).toFixed(4)}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="training-video-stage">{trainingStageMeta?.detail}</p>
                     <p className="training-video-cue">{activeTrainingCue}</p>
                     <ul className="training-cue-list">
@@ -1665,6 +2360,16 @@ function App() {
                       />
                     </label>
                   </div>
+                  <div className="form-row-actions" style={{ marginTop: '1rem' }}>
+                    <button
+                      className="secondary-btn"
+                      type="button"
+                      onClick={() => void handleRestartEngine()}
+                      disabled={engineStatus.phase === 'starting'}
+                    >
+                      {engineStatus.phase === 'starting' ? 'Starting...' : 'Restart Engine Service'}
+                    </button>
+                  </div>
                   <div className="toggle-row">
                     <label>
                       <input
@@ -1814,41 +2519,96 @@ function App() {
         </div>
       ) : null}
 
-      {showPermissionPopup ? (
+      {gestureSetupForm ? (
         <div
           className="modal-backdrop"
           role="presentation"
-          onClick={() => {
-            setShowPermissionPopup(false)
-            setPendingGesturePreset(null)
-          }}
+          onClick={() => setGestureSetupForm(null)}
         >
           <section
-            className="modal-card modal-card-compact"
+            className="modal-card modal-card-wide gesture-setup-modal"
             role="dialog"
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3>Allow Device Access</h3>
-            <p>
-              Octave needs{' '}
-              {pendingGesturePreset?.type === 'voice' ? 'camera and microphone' : 'camera'} access
-              to start {pendingGesturePreset?.type === 'voice' ? 'voice' : 'hand'} gesture setup in
-              Live Monitoring.
+            <h3>Set Up Your Gesture</h3>
+            <p className="add-intro">
+              Give your gesture a name and choose what it should do. You can change this later.
             </p>
-            <div className="modal-actions">
+
+            {/* Name Field */}
+            <label className="form-field gesture-setup-name-field">
+              <span>Gesture Name</span>
+              <input
+                type="text"
+                value={gestureSetupForm.name}
+                maxLength={48}
+                placeholder="e.g. Open Browser, Play Music..."
+                onChange={(e) =>
+                  setGestureSetupForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                }
+              />
+            </label>
+
+            {/* Phrase Field for voice */}
+            {gestureSetupForm.preset?.type === 'voice' ? (
+              <label className="form-field gesture-setup-name-field">
+                <span>Voice Phrase</span>
+                <input
+                  type="text"
+                  value={gestureSetupForm.phrase}
+                  maxLength={64}
+                  placeholder="e.g. next tab, mute audio..."
+                  onChange={(e) =>
+                    setGestureSetupForm((prev) =>
+                      prev ? { ...prev, phrase: e.target.value } : prev
+                    )
+                  }
+                />
+              </label>
+            ) : null}
+
+            {/* Action Picker */}
+            <div className="gesture-setup-actions-label">
+              <span>What should this gesture do?</span>
+            </div>
+            <div className="gesture-setup-action-groups">
+              {AVAILABLE_ACTIONS.map((group) => (
+                <div key={group.group} className="gesture-action-group">
+                  <span className="gesture-action-group-label">{group.group}</span>
+                  <div className="gesture-action-toggles">
+                    {group.actions.map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        className={`gesture-action-toggle ${gestureSetupForm.action === action ? 'selected' : ''}`}
+                        onClick={() =>
+                          setGestureSetupForm((prev) => (prev ? { ...prev, action } : prev))
+                        }
+                      >
+                        {action}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
               <button
                 className="modal-cancel"
                 type="button"
-                onClick={() => {
-                  setShowPermissionPopup(false)
-                  setPendingGesturePreset(null)
-                }}
+                onClick={() => setGestureSetupForm(null)}
               >
-                Not now
+                Cancel
               </button>
-              <button className="primary-btn" type="button" onClick={handleConfirmGestureCreation}>
-                Allow & Continue
+              <button
+                className="primary-btn"
+                type="button"
+                disabled={!gestureSetupForm.name.trim()}
+                onClick={() => void handleStartGestureTraining()}
+              >
+                Start Training
               </button>
             </div>
           </section>
@@ -1945,9 +2705,10 @@ function App() {
           >
             <h3>Edit Gesture</h3>
             <label className="form-field">
-              <span>Name</span>
+              <span>{editingGesture.type === 'voice' ? 'Voice Phrase Name' : 'Name'}</span>
               <input
                 value={editingGesture.title}
+                disabled={editingGesture.type === 'voice'}
                 onChange={(event) =>
                   setEditingGesture((prev) =>
                     prev ? { ...prev, title: event.target.value } : prev
@@ -1957,14 +2718,20 @@ function App() {
             </label>
             <label className="form-field">
               <span>Action</span>
-              <input
+              <select
                 value={editingGesture.subtitle}
                 onChange={(event) =>
                   setEditingGesture((prev) =>
                     prev ? { ...prev, subtitle: event.target.value } : prev
                   )
                 }
-              />
+              >
+                {ACTION_OPTIONS.map((action) => (
+                  <option key={action} value={action}>
+                    {action}
+                  </option>
+                ))}
+              </select>
             </label>
             <div className="modal-actions">
               <button

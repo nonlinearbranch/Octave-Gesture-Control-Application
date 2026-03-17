@@ -14,6 +14,7 @@ from action_engine.app_launcher import open_vscode, open_app, open_folder
 from action_engine.system_actions import play_pause, mute, playback_speed
 from utils.helpers import load_gesture_mapping
 import subprocess
+import sys
 import webbrowser
 
 import pyautogui
@@ -71,17 +72,83 @@ def execute_custom_action(action):
         if name == "MuteToggle":
             mute()
             return True
+        if name == "VolumeUp":
+            pyautogui.press("volumeup")
+            return True
+        if name == "VolumeDown":
+            pyautogui.press("volumedown")
+            return True
+        if name == "NextTrack":
+            pyautogui.press("nexttrack")
+            return True
+        if name == "PrevTrack":
+            pyautogui.press("prevtrack")
+            return True
         if name == "AltRight":
             pyautogui.hotkey("alt", "right")
             return True
+        if name == "SwitchTab":
+            pyautogui.hotkey("ctrl", "tab")
+            return True
+        if name == "SwitchWindow":
+            pyautogui.hotkey("alt", "tab")
+            return True
+        if name == "ScrollUp":
+            pyautogui.scroll(500)
+            return True
+        if name == "ScrollDown":
+            pyautogui.scroll(-500)
+            return True
+        if name == "GoBack":
+            pyautogui.hotkey("alt", "left")
+            return True
+        if name == "GoForward":
+            pyautogui.hotkey("alt", "right")
+            return True
+        if name == "ConfirmEnter":
+            pyautogui.press("enter")
+            return True
+        if name == "Escape":
+            pyautogui.press("esc")
+            return True
+        if name == "Screenshot":
+            pyautogui.press("printscreen")
+            return True
+        if name == "LockScreen":
+            if sys.platform == "win32":
+                subprocess.Popen("rundll32.exe user32.dll,LockWorkStation", shell=True)
+                return True
+            if sys.platform == "darwin":
+                subprocess.Popen(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "System Events" to keystroke "q" using {control down, command down}'
+                    ]
+                )
+                return True
+            subprocess.Popen(["xdg-screensaver", "lock"])
+            return True
         if name == "Click":
             pyautogui.click()
+            return True
+        if name == "DoubleClick":
+            pyautogui.doubleClick()
+            return True
+        if name == "RightClick":
+            pyautogui.rightClick()
+            return True
+        if name == "MiddleClick":
+            pyautogui.middleClick()
             return True
         if name == "ModeSwitch":
             switch_mode()
             return True
         if name == "OpenVSCode":
             open_vscode()
+            return True
+        if name == "OpenBrowser":
+            webbrowser.open("about:blank")
             return True
         if name.startswith("launch:"):
             return open_app(name.split(":", 1)[1].strip())

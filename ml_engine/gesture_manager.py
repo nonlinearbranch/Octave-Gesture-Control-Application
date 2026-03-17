@@ -94,8 +94,29 @@ def rename_gesture(old_name_or_label, new_name, map_path=None):
                 break
     if key is None:
         raise KeyError("Gesture not found")
+    for candidate_key, candidate_name in label_map.items():
+        if candidate_key == key:
+            continue
+        if str(candidate_name).strip().lower() == new_name.lower():
+            raise ValueError("Gesture name already exists")
+
+    old_name = str(label_map[key]).strip()
     label_map[key] = new_name
     save_label_map(label_map, map_path)
+    if old_name and old_name != new_name:
+        mapping = load_gesture_mapping(force=True)
+        static_actions = mapping.setdefault("static_actions", {})
+        if old_name in static_actions:
+            static_actions[new_name] = static_actions.pop(old_name)
+
+        disabled_static = mapping.get("disabled_static") or []
+        if old_name in disabled_static:
+            mapping["disabled_static"] = [
+                new_name if gesture_name == old_name else gesture_name
+                for gesture_name in disabled_static
+            ]
+
+        save_gesture_mapping(mapping)
     return int(key)
 
 
@@ -147,6 +168,7 @@ def delete_gesture(name_or_label, csv_path=None, map_path=None):
     if label is None:
         raise KeyError("Gesture not found")
 
+    gesture_name = str(label_map[str(label)]).strip()
     del label_map[str(label)]
     save_label_map(label_map, map_path)
 
@@ -157,6 +179,20 @@ def delete_gesture(name_or_label, csv_path=None, map_path=None):
             data.to_csv(csv_path, index=False, header=False)
 
     normalize_labels(csv_path=csv_path, map_path=map_path)
+
+    if gesture_name:
+        mapping = load_gesture_mapping(force=True)
+        static_actions = mapping.setdefault("static_actions", {})
+        if gesture_name in static_actions:
+            del static_actions[gesture_name]
+
+        disabled_static = mapping.get("disabled_static") or []
+        if gesture_name in disabled_static:
+            mapping["disabled_static"] = [
+                item for item in disabled_static if str(item).strip() != gesture_name
+            ]
+
+        save_gesture_mapping(mapping)
     return label
 
 
@@ -224,9 +260,20 @@ def collect_samples_for_label(label, target_samples=None, capture_interval=None)
     return samples
 
 
-def retrain_static_model(progress_callback=None, epochs=None):
-    csv_path, _, model_path = _paths()
-    normalize_labels(csv_path=csv_path)
+def retrain_static_model(
+    progress_callback=None,
+    epochs=None,
+    csv_path=None,
+    model_path=None,
+    normalize=True,
+    map_path=None
+):
+    default_csv, default_map, default_model = _paths()
+    csv_path = csv_path or default_csv
+    model_path = model_path or default_model
+    map_path = map_path or default_map
+    if normalize:
+        normalize_labels(csv_path=csv_path, map_path=map_path)
     return train_static_model(
         csv_path=csv_path,
         model_path=model_path,

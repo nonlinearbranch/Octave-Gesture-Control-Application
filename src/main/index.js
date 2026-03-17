@@ -3,20 +3,6 @@ import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
 
 const isDev = !app.isPackaged
-const trainingJobs = new Map()
-
-const stopTrainingJob = (webContentsId) => {
-  const job = trainingJobs.get(webContentsId)
-  if (!job) return null
-  clearInterval(job.timer)
-  trainingJobs.delete(webContentsId)
-  return job
-}
-
-const sendTrainingProgress = (webContents, payload) => {
-  if (!webContents || webContents.isDestroyed()) return
-  webContents.send('training:progress', payload)
-}
 
 function loadRendererWindow(window) {
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
@@ -57,7 +43,57 @@ function createWindow(options = {}) {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+import { engineService } from './engine-service'
+
+// ... existing code ...
+
 app.whenReady().then(() => {
+  // Initialize Python Engine
+  engineService
+    .ensureStarted()
+    .then(() => {
+      // Silence AV scanning overhead on Windows for future startups
+      // tryAddDefenderExclusion(engineService.pythonExe)
+      console.log('Engine service ready, waiting for frontend start command.')
+    })
+    .catch((err) => {
+      console.error('Failed to start engine service:', err)
+    })
+
+  // Forward engine events to all windows
+  engineService.on('training.progress', (payload) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('training:progress', payload)
+      }
+    })
+  })
+
+  engineService.on('engine.status', (payload) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('engine:status', payload)
+      }
+    })
+  })
+
+  engineService.on('engine.error', (payload) => {
+    console.error('Forwarding engine error:', payload)
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('engine:error', payload)
+      }
+    })
+  })
+
+  engineService.on('engine.voice', (payload) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('engine:voice', payload)
+      }
+    })
+  })
+
   session.defaultSession.setPermissionRequestHandler((_, permission, callback) => {
     if (permission === 'media' || permission === 'camera' || permission === 'microphone') {
       callback(true)
@@ -96,81 +132,108 @@ app.whenReady().then(() => {
     return true
   })
 
-  ipcMain.handle('training:start', (event, payload = {}) => {
-    const webContents = event.sender
-    const webContentsId = webContents.id
-    stopTrainingJob(webContentsId)
-
-    const type = payload?.type === 'voice' ? 'voice' : 'hand'
-    const gestureId =
-      typeof payload?.gestureId === 'string' && payload.gestureId.trim()
-        ? payload.gestureId.trim()
-        : `gesture-${Date.now()}`
-    const sessionId = `${webContentsId}-${Date.now()}`
-    const step = type === 'voice' ? 9 : 7
-    let progress = 0
-
-    sendTrainingProgress(webContents, {
-      sessionId,
-      gestureId,
-      type,
-      progress,
-      done: false
-    })
-
-    const timer = setInterval(() => {
-      const jitter = Math.floor(Math.random() * 3)
-      progress = Math.min(100, progress + step + jitter)
-      const done = progress >= 100
-
-      sendTrainingProgress(webContents, {
-        sessionId,
-        gestureId,
-        type,
-        progress,
-        done
-      })
-
-      if (done) {
-        stopTrainingJob(webContentsId)
-      }
-    }, 320)
-
-    trainingJobs.set(webContentsId, { timer, sessionId, gestureId, type })
-    return { ok: true, sessionId, gestureId, type }
+  ipcMain.on('app:log', (_, message) => {
+    console.log('[Renderer]', message)
   })
 
-  ipcMain.handle('training:complete', (event) => {
-    const webContents = event.sender
-    const webContentsId = webContents.id
-    const job = stopTrainingJob(webContentsId)
-    if (!job) return { ok: false, reason: 'no_active_session' }
-
-    sendTrainingProgress(webContents, {
-      sessionId: job.sessionId,
-      gestureId: job.gestureId,
-      type: job.type,
-      progress: 100,
-      done: true
-    })
-    return { ok: true, sessionId: job.sessionId }
+  ipcMain.handle('engine:update-settings', async (event, payload = {}) => {
+    try {
+      const response = await engineService.request('engine.update_settings', payload)
+      return response
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
   })
 
-  ipcMain.handle('training:cancel', (event) => {
-    const webContents = event.sender
-    const webContentsId = webContents.id
-    const job = stopTrainingJob(webContentsId)
-    if (!job) return { ok: false, reason: 'no_active_session' }
+  ipcMain.handle('training:start', async (event, payload = {}) => {
+    try {
+      const response = await engineService.request('training.start', payload)
+      return response
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
 
-    sendTrainingProgress(webContents, {
-      sessionId: job.sessionId,
-      gestureId: job.gestureId,
-      type: job.type,
-      progress: 0,
-      done: false,
-      cancelled: true
-    })
-    return { ok: true, sessionId: job.sessionId }
+  ipcMain.handle('training:complete', async () => {
+    try {
+      const response = await engineService.request('training.complete', {})
+      return response
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('training:cancel', async () => {
+    try {
+      const response = await engineService.request('training.cancel', {})
+      return response
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('engine:start', async () => {
+    try {
+      console.log('[Main] IPC: engine:start received')
+      const result = await engineService.request('engine.start', {})
+      console.log('[Main] IPC: engine:start result:', result)
+      return result
+    } catch (error) {
+      console.error('[Main] IPC: engine:start failed:', error)
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('engine:stop', async () => {
+    try {
+      return await engineService.request('engine.stop', {})
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('engine:get-status', () => {
+    return engineService.getStatusSnapshot()
+  })
+
+  ipcMain.handle('engine:update-mapping', async (event, payload = {}) => {
+    try {
+      return await engineService.request('engine.update_mapping', payload)
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('gesture:update', async (event, payload = {}) => {
+    try {
+      return await engineService.request('gesture.update', payload)
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('gesture:delete', async (event, payload = {}) => {
+    try {
+      return await engineService.request('gesture.delete', payload)
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('gestures:list', async () => {
+    try {
+      return await engineService.request('gestures.list', {})
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('gestures:list', async () => {
+    try {
+      return await engineService.request('gestures.list', {})
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
   })
 
   if (process.platform === 'win32') {
@@ -198,7 +261,7 @@ app.whenReady().then(() => {
 
   app.on('web-contents-created', (_, webContents) => {
     webContents.on('destroyed', () => {
-      stopTrainingJob(webContents.id)
+      // proper cleanup handled by engine service if needed
     })
   })
 
