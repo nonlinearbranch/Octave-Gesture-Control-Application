@@ -4,6 +4,13 @@ import icon from '../../resources/icon.png?asset'
 
 const isDev = !app.isPackaged
 
+app.setPath('sessionData', join(app.getPath('userData'), 'session'))
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
 function loadRendererWindow(window) {
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     window.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -264,6 +271,16 @@ app.whenReady().then(() => {
       createWindow()
     }
   })
+})
+
+app.on('second-instance', () => {
+  const [window] = BrowserWindow.getAllWindows()
+  if (!window) return
+  if (window.isMinimized()) {
+    window.restore()
+  }
+  window.focus()
+  window.show()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common
