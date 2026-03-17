@@ -228,14 +228,6 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('gestures:list', async () => {
-    try {
-      return await engineService.request('gestures.list', {})
-    } catch (error) {
-      return { ok: false, error: error.message }
-    }
-  })
-
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.octave.app')
   }

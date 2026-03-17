@@ -8,9 +8,9 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
-    "start": "electron-vite preview",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "start": "node scripts/run-electron-vite.cjs preview",
+    "dev": "node scripts/run-electron-vite.cjs dev",
+    "build": "node scripts/run-electron-vite.cjs build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
