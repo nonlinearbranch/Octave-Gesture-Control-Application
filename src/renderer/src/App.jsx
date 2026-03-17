@@ -799,7 +799,8 @@ function App() {
     if (window.api?.onEngineError) {
       unsubError = window.api.onEngineError((payload) => {
         console.error('[App] Engine error received:', payload)
-        const errorMsg = payload.error || 'Unknown engine error'
+        const errorMsg =
+          payload?.error || payload?.traceback || payload?.stage || 'Unknown engine error'
         setEngineStatus((prev) => ({ ...prev, running: false, phase: 'error' }))
         notifyFromEffect('Engine Error', errorMsg, true)
       })

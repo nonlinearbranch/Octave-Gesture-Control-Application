@@ -1,17 +1,47 @@
 import { app, shell, BrowserWindow, session, ipcMain, Notification } from 'electron'
 import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
+import { logError, logInfo, logWarn } from './logger'
 
 const isDev = !app.isPackaged
 
+if (isDev) {
+  app.setPath('userData', join(app.getPath('appData'), `${app.getName()}-dev`))
+}
+
+process.on('uncaughtException', (error) => {
+  logError('uncaughtException', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  logError('unhandledRejection', reason)
+})
+
+process.stdout?.on?.('error', (error) => {
+  if (error?.code === 'EPIPE') {
+    return
+  }
+  logWarn('stdout stream error', error)
+})
+
+process.stderr?.on?.('error', (error) => {
+  if (error?.code === 'EPIPE') {
+    return
+  }
+  logWarn('stderr stream error', error)
+})
+
 app.setPath('sessionData', join(app.getPath('userData'), 'session'))
+logInfo(`app bootstrap start (packaged=${app.isPackaged}, dev=${isDev})`)
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
+  logInfo('second instance detected during bootstrap, quitting immediately')
   app.quit()
 }
 
 function loadRendererWindow(window) {
+  logInfo(`loadRendererWindow (dev=${isDev})`)
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -20,6 +50,7 @@ function loadRendererWindow(window) {
 }
 
 function createWindow(options = {}) {
+  logInfo('createWindow called')
   const window = new BrowserWindow({
     title: 'Octave',
     width: 1000,
@@ -35,7 +66,20 @@ function createWindow(options = {}) {
   })
 
   window.on('ready-to-show', () => {
+    logInfo('main window ready-to-show')
     window.show()
+  })
+
+  window.on('closed', () => {
+    logInfo('main window closed')
+  })
+
+  window.webContents.on('did-fail-load', (_, code, description, validatedURL) => {
+    logWarn(`renderer did-fail-load code=${code} description=${description} url=${validatedURL}`)
+  })
+
+  window.webContents.on('render-process-gone', (_, details) => {
+    logWarn('renderer process gone', details)
   })
 
   window.webContents.setWindowOpenHandler((details) => {
@@ -55,16 +99,17 @@ import { engineService } from './engine-service'
 // ... existing code ...
 
 app.whenReady().then(() => {
+  logInfo('app.whenReady resolved')
   // Initialize Python Engine
   engineService
     .ensureStarted()
     .then(() => {
       // Silence AV scanning overhead on Windows for future startups
       // tryAddDefenderExclusion(engineService.pythonExe)
-      console.log('Engine service ready, waiting for frontend start command.')
+      logInfo('Engine service ready, waiting for frontend start command.')
     })
     .catch((err) => {
-      console.error('Failed to start engine service:', err)
+      logError('Failed to start engine service', err)
     })
 
   // Forward engine events to all windows
@@ -85,7 +130,7 @@ app.whenReady().then(() => {
   })
 
   engineService.on('engine.error', (payload) => {
-    console.error('Forwarding engine error:', payload)
+    logError('Forwarding engine error', payload)
     BrowserWindow.getAllWindows().forEach((win) => {
       if (!win.isDestroyed()) {
         win.webContents.send('engine:error', payload)
@@ -140,7 +185,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on('app:log', (_, message) => {
-    console.log('[Renderer]', message)
+    logInfo(`[Renderer] ${message}`)
   })
 
   ipcMain.handle('engine:update-settings', async (event, payload = {}) => {
@@ -181,12 +226,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('engine:start', async () => {
     try {
-      console.log('[Main] IPC: engine:start received')
+      logInfo('[Main] IPC: engine:start received')
       const result = await engineService.request('engine.start', {})
-      console.log('[Main] IPC: engine:start result:', result)
+      logInfo('[Main] IPC: engine:start result', result)
       return result
     } catch (error) {
-      console.error('[Main] IPC: engine:start failed:', error)
+      logError('[Main] IPC: engine:start failed', error)
       return { ok: false, error: error.message }
     }
   })
@@ -257,6 +302,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  logInfo('createWindow completed')
 
   app.on('web-contents-created', (_, webContents) => {
     webContents.on('destroyed', () => {
@@ -274,6 +320,7 @@ app.whenReady().then(() => {
 })
 
 app.on('second-instance', () => {
+  logInfo('second-instance event received')
   const [window] = BrowserWindow.getAllWindows()
   if (!window) return
   if (window.isMinimized()) {
@@ -287,6 +334,7 @@ app.on('second-instance', () => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  logInfo('window-all-closed fired')
   if (process.platform !== 'darwin') {
     app.quit()
   }

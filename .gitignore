@@ -8,6 +8,7 @@ out
 # PyInstaller build output
 python_dist/
 build/service/
+build/pyinstaller/
 build_spec_cache/
 *.spec.bak
 

@@ -4,6 +4,7 @@ import { dirname, join } from 'path'
 import { app } from 'electron'
 import { spawn } from 'child_process'
 import { createInterface } from 'readline'
+import { logError, logInfo } from './logger'
 
 const REQUEST_TIMEOUT_MS = 15000
 
@@ -65,7 +66,7 @@ const getLaunchCandidates = () => {
   // 2. Packaged mode – use the bundled service.exe
   const bundledExe = getBundledExePath()
   if (bundledExe) {
-    console.log(`[EngineService] Using bundled exe: ${bundledExe}`)
+    logInfo(`[EngineService] Using bundled exe: ${bundledExe}`)
     return [{ command: bundledExe, args: [], useExe: true }]
   }
 
@@ -95,9 +96,8 @@ class EngineService extends EventEmitter {
     this.lastRuntime = null
     this.lastStatus = { connected: false, running: false, phase: 'stopped', lastError: '' }
     this.startPromise = null
-    this.pythonExe = null  // populated after successful spawn
+    this.pythonExe = null // populated after successful spawn
   }
-
 
   getStatusSnapshot() {
     return {
@@ -179,20 +179,21 @@ class EngineService extends EventEmitter {
     const scriptPath = candidate.useExe ? null : pickScriptPath()
     const command = candidate.command
     const args = candidate.useExe
-      ? [...candidate.args]                       // exe needs no extra args
-      : [...candidate.args, scriptPath]           // python <path/to/service.py>
+      ? [...candidate.args] // exe needs no extra args
+      : [...candidate.args, scriptPath] // python <path/to/service.py>
 
     // cwd: for the exe use its own directory so relative imports resolve;
     // for dev script use the script's directory.
-    const cwd = candidate.useExe
-      ? dirname(command)
-      : dirname(scriptPath)
+    const cwd = candidate.useExe ? dirname(command) : dirname(scriptPath)
 
     return new Promise((resolve, reject) => {
       let settled = false
       let readyTimeout = null
+      const onStderr = (chunk) => {
+        logError(`[EngineService] stderr: ${chunk.toString()}`)
+      }
 
-      console.log(`[EngineService] Spawning: ${command} ${args.join(' ')}`)
+      logInfo(`[EngineService] Spawning: ${command} ${args.join(' ')}`.trim())
       const child = spawn(command, args, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -218,24 +219,24 @@ class EngineService extends EventEmitter {
         } catch {
           // ignore kill errors
         }
-        console.error(`[EngineService] Startup failed: ${error.message}`)
+        logError(`[EngineService] Startup failed: ${error.message}`)
         reject(error)
       }
 
       child.once('error', (error) => {
-        console.error(`[EngineService] Child process error: ${error.message}`)
+        logError(`[EngineService] Child process error: ${error.message}`)
         fail(error)
       })
 
       child.once('exit', (code, signal) => {
         if (settled) return
-        console.error(`[EngineService] Child exited early: code=${code}, signal=${signal}`)
+        logError(`[EngineService] Child exited early: code=${code}, signal=${signal}`)
         fail(new Error(`Engine exited early (${code ?? 'null'}, ${signal ?? 'null'})`))
       })
 
       const rl = createInterface({ input: child.stdout })
       rl.on('line', (line) => {
-        console.log(`[EngineService] stdout: ${line}`)
+        logInfo(`[EngineService] stdout: ${line}`)
         let parsed = null
         try {
           parsed = JSON.parse(line)
@@ -243,17 +244,16 @@ class EngineService extends EventEmitter {
           return
         }
         if (parsed.type === 'engine.ready' && !settled) {
-          console.log('[EngineService] Engine ready signal received.')
+          logInfo('[EngineService] Engine ready signal received.')
           settled = true
           cleanup()
+          child.stderr.off('data', onStderr)
           rl.close()
           resolve({ child, scriptPath, command, args })
         }
       })
 
-      child.stderr.on('data', (chunk) => {
-        console.error(`[EngineService] stderr: ${chunk.toString()}`)
-      })
+      child.stderr.on('data', onStderr)
 
       readyTimeout = setTimeout(() => {
         fail(new Error('Engine startup timed out'))
@@ -291,21 +291,20 @@ class EngineService extends EventEmitter {
             lastError: ''
           }
 
-
           this.readline = createInterface({ input: this.child.stdout })
           this.readline.on('line', (line) => {
             try {
               const parsed = JSON.parse(line)
               this._handleMessage(parsed)
             } catch {
-              console.log(`[EngineService] stdout: ${line}`)
+              logInfo(`[EngineService] stdout: ${line}`)
             }
           })
 
           this.child.stderr.on('data', (chunk) => {
             const text = String(chunk || '').trim()
             if (!text) return
-            console.error(`[EngineService] stderr: ${text}`)
+            logError(`[EngineService] stderr: ${text}`)
             this.emit('engine.stderr', { text })
           })
 

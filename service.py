@@ -327,7 +327,8 @@ class TrainingCoordinator:
             {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "imports_start"}
         )
         import cv2
-        import mediapipe as mp
+        from mediapipe.python.solutions import drawing_utils as mp_drawing
+        from mediapipe.python.solutions import hands as mp_hands
 
         from ml_engine.feature_extraction import extract_features
         from ml_engine.gesture_manager import add_gesture, load_label_map, retrain_static_model, set_static_action
@@ -374,7 +375,6 @@ class TrainingCoordinator:
                 {"sessionId": job["session_id"], "gestureId": job["gesture_id"], "stage": "camera_prepare"}
             )
 
-            mp_hands = mp.solutions.hands
             hands = mp_hands.Hands(
                 max_num_hands=1,
                 model_complexity=int(get_setting("hand_model_complexity", 0)),
@@ -443,10 +443,10 @@ class TrainingCoordinator:
                     if self.stream_callback:
                         annotated = frame.copy()
                         for hand_landmarks in result.multi_hand_landmarks:
-                            mp.solutions.drawing_utils.draw_landmarks(
+                            mp_drawing.draw_landmarks(
                                 annotated,
                                 hand_landmarks,
-                                mp.solutions.hands.HAND_CONNECTIONS
+                                mp_hands.HAND_CONNECTIONS
                             )
                         cv2.putText(
                             annotated,
@@ -624,12 +624,11 @@ class RuntimeEngine:
         """Preload heavy modules in background to make 'Start' instant."""
         try:
             import cv2
-            import mediapipe
+            from mediapipe.python.solutions import hands as mp_hands
             import pandas
             import numpy
             import torch
-            # Also trigger the heavy submodule loads
-            _ = mediapipe.solutions.hands
+            _ = mp_hands.Hands
         except Exception:
             pass  # Failures here are non-fatal; real imports happen in _loop
 
@@ -719,7 +718,8 @@ class RuntimeEngine:
         try:
             # these should be fast if preloading finished
             import cv2
-            import mediapipe as mp
+            from mediapipe.python.solutions import drawing_utils as mp_drawing
+            from mediapipe.python.solutions import hands as mp_hands
             
             from dynamic_engine.drs_gesture import detect_drs
             from dynamic_engine.family_detector import DynamicFamilyDetector
@@ -769,7 +769,6 @@ class RuntimeEngine:
         if label_map and os.path.exists(model_path):
             init_static_model(model_path, 63, len(label_map))
 
-        mp_hands = mp.solutions.hands
         hands = mp_hands.Hands(
             max_num_hands=int(get_setting("max_hands", 2)),
             model_complexity=int(get_setting("hand_model_complexity", 0)),
@@ -961,7 +960,7 @@ class RuntimeEngine:
                     # Simple landmark drawing if we have results
                     if result.multi_hand_landmarks:
                         for hand_landmarks in result.multi_hand_landmarks:
-                            mp.solutions.drawing_utils.draw_landmarks(
+                            mp_drawing.draw_landmarks(
                                 annotated_frame,
                                 hand_landmarks,
                                 mp_hands.HAND_CONNECTIONS

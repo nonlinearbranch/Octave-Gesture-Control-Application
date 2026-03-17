@@ -76,6 +76,9 @@ hidden_imports = [
     # Pillow
     'PIL',
     'PIL.Image',
+    # Mediapipe drawing utils import matplotlib at module import time
+    'matplotlib',
+    'matplotlib.pyplot',
     # Our local packages
     'action_engine',
     'api_engine',
@@ -101,7 +104,6 @@ a = Analysis(
     excludes=[
         # Things we definitely don't need in the backend bundle
         'tkinter',
-        'matplotlib',
         'IPython',
         'jupyter',
         'notebook',
