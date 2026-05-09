@@ -1,0 +1,11 @@
+# SPIDER ML service runtime dependencies.
+# Install into a local virtual environment; do not vendor site-packages into this repo.
+flask>=3.0,<4
+numpy>=1.26,<3
+opencv-contrib-python>=4.10,<5
+mediapipe==0.10.9
+pandas>=2.2,<3
+sounddevice>=0.5,<0.6
+torch>=2.3,<3
+vosk>=0.3,<0.4
+

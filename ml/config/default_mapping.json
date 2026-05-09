@@ -1,0 +1,21 @@
+{
+  "static": {
+    "0": {"name": "DRS_T_Frame", "action": "Power Command"},
+    "1": {"name": "Fist", "action": "Play / Pause"},
+    "2": {"name": "Index_Pointing", "action": "Mode: Cursor Control"},
+    "3": {"name": "Neutral", "action": "None"},
+    "4": {"name": "OK_Sign", "action": "Confirm / Enter"},
+    "5": {"name": "Open_Palm_Fingers_Pointing_Moving_Vertically", "action": "Mode: Magnitude Slider"},
+    "6": {"name": "Pinch_Closed", "action": "Mode: Grab and Drag"},
+    "7": {"name": "Thumb", "action": "Mute / Unmute"},
+    "8": {"name": "Two_Fingers_Extended_Pointing_Moving_Vertically", "action": "Mode: Scroll Control"},
+    "9": {"name": "V_Sign", "action": "Next / Previous"}
+  },
+  "dynamic": {
+    "0": {"name": "Circular_Clockwise", "action": "Volume Up"},
+    "1": {"name": "Circular_Counter_Clockwise", "action": "Volume Down"},
+    "2": {"name": "Push_Forward", "action": "Minimize Window"},
+    "3": {"name": "Swipe_Left", "action": "Navigate Back"},
+    "4": {"name": "Swipe_Right", "action": "Navigate Forward"}
+  }
+}
