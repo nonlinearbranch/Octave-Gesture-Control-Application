@@ -1,0 +1,42 @@
+# Build outputs
+build/
+out/
+dist/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.vcxproj
+*.slnx
+
+# Runtime logs and crash traces
+*.log
+ml/startup_trace.log
+ml/service_error.log
+
+# Python generated files and local environments
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+myenv/
+.venv/
+venv/
+
+# Python vendored dependency dumps
+ml/vendor/
+
+# Node generated files
+ui/node_modules/
+ui/out/
+ui/dist/
+
+# Local ML artifacts and heavy models
+ml/data/models/
+vosk-model-small-en-us-0.15/
+ml/data/vosk-model-small-en-us-0.15/
+
+test_feature_extraction.py
+testing.py
