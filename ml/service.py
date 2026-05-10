@@ -485,10 +485,14 @@ class MlService:
         self._last_tracking_status_emit = 0.0
         self._last_no_hand_debug_print = 0.0
         self._tracking_fail_count = 0
+        self._camera_read_fail_count = 0
         self._hand_present_prev = False
         self._clutch_active_prev = False
         self._clutch_last_activity_at = 0.0
         self._clutch_idle_timeout_sec = 0.55
+        self._clutch_session_duration_sec = 12.0
+        self._clutch_session_expires_at = 0.0
+        self._clutch_session_armed = False
         self._continuous_seen_at = 0.0
         self._active_continuous_label: str | None = None
         self._continuous_smoothed_value = 0.0
@@ -634,6 +638,8 @@ class MlService:
         self._sequence_buffer.clear()
         self._clutch_active_prev = False
         self._clutch_last_activity_at = 0.0
+        self._clutch_session_expires_at = 0.0
+        self._clutch_session_armed = False
         self._continuous_seen_at = 0.0
         self._active_continuous_label = None
         self._continuous_smoothed_value = 0.0
@@ -643,6 +649,13 @@ class MlService:
         self._dynamic_last_motion_at = 0.0
         self._dynamic_motion_history.clear()
         self._dynamic_prev_wrist = None
+        self._camera_read_fail_count = 0
+
+    def _is_clutch_session_active(self, now: float | None = None) -> bool:
+        if not self._clutch_session_armed:
+            return False
+        current_time = now if now is not None else time.monotonic()
+        return current_time < self._clutch_session_expires_at
 
     def _measure_motion(self, normalized_hand: "NormalizedHandFrame" | None) -> float:
         if normalized_hand is None or not normalized_hand.landmarks_xyz:
@@ -1084,6 +1097,7 @@ class MlService:
         raw_gesture_hint: str | None,
         inference_result: StaticInferenceResult | None,
         is_recording: bool,
+        clutch_seconds_remaining: float = 0.0,
     ) -> PreviewState:
         status_text = "Detecting hand"
         hint_text = "Move your hand into frame"
@@ -1100,6 +1114,9 @@ class MlService:
         elif not camera_ready:
             status_text = "Camera unavailable"
             hint_text = "Check camera access and service status"
+        elif clutch_active and not hand_present:
+            status_text = "Clutch armed"
+            hint_text = f"Raise a hand and make your gesture. {max(0, int(clutch_seconds_remaining))}s remaining"
         elif not hand_present:
             status_text = "Detecting hand"
             hint_text = "Move your hand into frame"
@@ -1125,8 +1142,8 @@ class MlService:
             hint_text = "Gesture recognized and ready for dispatch"
             inference_label = inference_result.label_name
         else:
-            status_text = "Clutch ready"
-            hint_text = "Make your gesture now"
+            status_text = "Clutch armed"
+            hint_text = f"Make your gesture now. {max(0, int(clutch_seconds_remaining))}s remaining"
 
         return PreviewState(
             camera_ready=camera_ready,
@@ -1156,6 +1173,7 @@ class MlService:
         """
 
         while self._running:
+            now = time.monotonic()
             is_recording = self._recording_label_idx is not None
 
             if self._interaction_mode == "VOICE" and not is_recording:
@@ -1172,14 +1190,20 @@ class MlService:
             if camera_frame is None:
                 camera_frame = self._camera_manager.read_frame()
             if camera_frame is None:
+                self._camera_read_fail_count += 1
                 self._tracking_fail_count += 1
                 self._emit_tracking_status(
                     "camera_read_failed",
                     error=self._camera_manager.get_last_error(),
                     force=True,
                 )
+                if self._camera_read_fail_count >= 6:
+                    self._camera_manager.close()
+                    self._camera_state = "closed"
+                    self._camera_read_fail_count = 0
                 time.sleep(0.02)
                 continue
+            self._camera_read_fail_count = 0
 
             # --- PIPELINE STAGE 2: INGESTION ---
             detection = self._hand_ingestion.process_frame(camera_frame)
@@ -1210,7 +1234,7 @@ class MlService:
                 hand_count=int(detection.hand_count),
                 tracking_confidence=float(detection.tracking_confidence),
                 gate1_passed=False,
-                clutch_active=False,
+                clutch_active=self._is_clutch_session_active(now),
                 clutch_progress=0,
                 required_clutch_frames=1,
                 hint_text="",
@@ -1227,21 +1251,27 @@ class MlService:
 
             # --- PIPELINE STAGE 4: GATES ---
             gate_decision = self._gate_pipeline.evaluate(normalized_hand)
+            if gate_decision.clutch_active and not self._is_clutch_session_active(now):
+                self._clutch_session_armed = True
+                self._clutch_session_expires_at = now + self._clutch_session_duration_sec
+                self._clutch_last_activity_at = now
+                self._play_clutch_activation_sound()
+            clutch_session_active = self._is_clutch_session_active(now)
+            if self._clutch_session_armed and not clutch_session_active:
+                self._reset_clutch_session()
+                clutch_session_active = False
             preview_state.gate1_passed = gate_decision.gate1_passed
-            preview_state.clutch_active = gate_decision.clutch_active
+            preview_state.clutch_active = clutch_session_active
             preview_state.clutch_progress = gate_decision.clutch_progress
             preview_state.required_clutch_frames = gate_decision.required_clutch_frames
-            if gate_decision.clutch_active and not self._clutch_active_prev:
-                self._play_clutch_activation_sound()
-            if gate_decision.clutch_active:
-                self._clutch_last_activity_at = time.monotonic()
-            self._clutch_active_prev = gate_decision.clutch_active
+            self._clutch_active_prev = clutch_session_active
             motion_score = self._measure_motion(normalized_hand)
 
             # --- PIPELINE STAGE 5: STATIC INFERENCE ---
             inference_result: StaticInferenceResult | None = None
             if (
-                gate_decision.accepted
+                clutch_session_active
+                and gate_decision.gate1_passed
                 and normalized_hand is not None
                 and not is_recording
                 and self._static_runner is not None
@@ -1255,7 +1285,8 @@ class MlService:
                 hand_count=int(detection.hand_count),
                 tracking_confidence=detection.tracking_confidence,
                 gate1_passed=gate_decision.gate1_passed,
-                clutch_active=gate_decision.clutch_active,
+                clutch_active=clutch_session_active,
+                clutch_seconds_remaining=max(0.0, self._clutch_session_expires_at - now),
                 clutch_progress=gate_decision.clutch_progress,
                 required_clutch_frames=gate_decision.required_clutch_frames,
                 raw_gesture_hint=detection.raw_gesture_hint,
@@ -1273,7 +1304,9 @@ class MlService:
 
             # --- PIPELINE STAGE 7: STABILIZER + COOLDOWN + IPC ---
             if not detection.hand_present:
-                if self._hand_present_prev:
+                if self._active_continuous_label is not None and now - self._continuous_seen_at >= self._clutch_idle_timeout_sec:
+                    self._reset_clutch_session()
+                elif not clutch_session_active and self._hand_present_prev:
                     self._reset_clutch_session()
                 self._hand_present_prev = False
                 time.sleep(0.02)
@@ -1326,7 +1359,8 @@ class MlService:
             # session. This prevents static and dynamic inference from fighting
             # over the same rolling frame window.
             if (
-                gate_decision.accepted
+                clutch_session_active
+                and gate_decision.gate1_passed
                 and normalized_hand is not None
                 and resolved_label == "UNKNOWN"
                 and motion_score >= self._dynamic_motion_threshold
@@ -1396,19 +1430,7 @@ class MlService:
                 time.sleep(0.02)
                 continue
 
-            if (
-                gate_decision.clutch_active and
-                not self._dynamic_capture_active and
-                self._active_continuous_label is None and
-                self._clutch_last_activity_at > 0.0 and
-                now - self._clutch_last_activity_at >= self._clutch_idle_timeout_sec
-            ):
-                self._reset_clutch_session()
-                time.sleep(0.02)
-                continue
-
             if stable_result.label != "UNKNOWN":
-                now = time.monotonic()
                 if now - self._last_action_time >= self._action_cooldown_sec:
                     self._last_action_time = now
                     predicted_label = stable_result.label

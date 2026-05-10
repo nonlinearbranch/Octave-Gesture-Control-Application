@@ -261,9 +261,141 @@ const DEFAULT_CONTEXT_ACTION_LABELS = {
   'Mode: Context Drag': 'Context Drag'
 }
 
-const getDefaultEngineGestureNames = (config = { default_mapping: { static: {} } }) =>
+const DEFAULT_GESTURE_DETAILS = {
+  Fist: {
+    title: 'Fist',
+    subtitle: 'One gesture, different quick actions by app.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch with both open palms.', 'Make a closed fist once.', 'Relax to finish the action.'],
+    contextActions: {
+      Media: 'Play / Pause',
+      Browser: 'Toggle fullscreen video',
+      Desktop: 'Toggle Start menu',
+      Conferencing: 'Mute / Unmute microphone'
+    }
+  },
+  Index_Pointing: {
+    title: 'Cursor Control',
+    subtitle: 'Point to move the cursor with real-time motion.',
+    family: 'Single-Action Default',
+    defaultSection: 'single',
+    howTo: ['Activate the clutch.', 'Point with your index finger.', 'Move your hand to steer the cursor.']
+  },
+  OK_Sign: {
+    title: 'OK Sign',
+    subtitle: 'One pose confirms the current selection.',
+    family: 'Single-Action Default',
+    defaultSection: 'single',
+    howTo: ['Activate the clutch.', 'Show the OK sign once.', 'The current selection is confirmed.']
+  },
+  Open_Palm_Fingers_Pointing_Moving_Vertically: {
+    title: 'Palm Slider',
+    subtitle: 'Slide an open palm to adjust the active app control.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Show one open palm.', 'Move up or down to adjust the active context.'],
+    contextActions: {
+      Browser: 'Scroll speed',
+      Media: 'Volume',
+      Editor: 'Zoom',
+      Desktop: 'Brightness',
+      Presentation: 'Slide navigation speed',
+      Conferencing: 'Mic gain / participant volume',
+      Gaming: 'Sensitivity / in-game brightness',
+      Design: 'Brush size / zoom'
+    }
+  },
+  Pinch_Closed: {
+    title: 'Pinch Drag',
+    subtitle: 'Pinch and move for context-aware dragging control.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Pinch thumb and index together.', 'Move while pinched to drag or pan.'],
+    contextActions: {
+      Browser: 'Drag scroll',
+      Desktop: 'Move window',
+      Editor: 'Move object / selection',
+      Design: 'Drag canvas / layer'
+    }
+  },
+  Thumb: {
+    title: 'Thumb',
+    subtitle: 'A quick mute / unmute toggle.',
+    family: 'Single-Action Default',
+    defaultSection: 'single',
+    howTo: ['Activate the clutch.', 'Show a thumbs-up once.', 'Audio mute toggles immediately.']
+  },
+  Two_Fingers_Extended_Pointing_Moving_Vertically: {
+    title: 'Two-Finger Vertical',
+    subtitle: 'Two fingers control scrolling, seeking, or zooming by app.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Raise two fingers together.', 'Move them up or down in one smooth line.'],
+    contextActions: {
+      Browser: 'Page scroll',
+      Media: 'Timeline seek',
+      Editor: 'Zoom in / out',
+      Presentation: 'Slide zoom / scroll speed'
+    }
+  },
+  Circular_Clockwise: {
+    title: 'Rotate Clockwise',
+    subtitle: 'A clockwise motion performs the matching app dial action.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Draw a clean clockwise circle.', 'Pause briefly after the motion ends.'],
+    contextActions: {
+      Media: 'Volume up',
+      Editor: 'Brush size increase',
+      Desktop: 'Switch tab',
+      Gaming: 'Weapon cycle / sensitivity adjust'
+    }
+  },
+  Circular_Counter_Clockwise: {
+    title: 'Rotate Counter-Clockwise',
+    subtitle: 'A counter-clockwise motion performs the reverse dial action.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Draw a clean counter-clockwise circle.', 'Pause briefly after the motion ends.'],
+    contextActions: {
+      Media: 'Volume down',
+      Editor: 'Brush size decrease',
+      Desktop: 'Switch window',
+      Gaming: 'Previous weapon / lower sensitivity'
+    }
+  },
+  Swipe_Left: {
+    title: 'Swipe Left',
+    subtitle: 'A single left swipe maps to the active app navigation action.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Swipe left once with a clear finish.', 'Let the motion end before the next gesture.'],
+    contextActions: {
+      Browser: 'Back',
+      Media: 'Previous track',
+      Editor: 'Undo',
+      Presentation: 'Previous slide'
+    }
+  },
+  Swipe_Right: {
+    title: 'Swipe Right',
+    subtitle: 'A single right swipe maps to the active app navigation action.',
+    family: 'Context-Aware Family',
+    defaultSection: 'context',
+    howTo: ['Activate the clutch.', 'Swipe right once with a clear finish.', 'Let the motion end before the next gesture.'],
+    contextActions: {
+      Browser: 'Forward',
+      Media: 'Next track',
+      Editor: 'Redo',
+      Presentation: 'Next slide'
+    }
+  }
+}
+
+const getDefaultEngineGestureNames = (config = { default_mapping: { static: {}, dynamic: {} } }) =>
   new Set(
-    Object.values(config.default_mapping?.static || {})
+    [...Object.values(config.default_mapping?.static || {}), ...Object.values(config.default_mapping?.dynamic || {})]
       .map((gesture) => gesture.name)
       .filter(Boolean)
   )
@@ -512,6 +644,7 @@ function App() {
   const [mediaError, setMediaError] = useState('')
   const [cameraFeedError, setCameraFeedError] = useState(false)
   const [cameraFeedNonce, setCameraFeedNonce] = useState(0)
+  const [cameraFeedFailureCount, setCameraFeedFailureCount] = useState(0)
   const [hasStartupPermissions, setHasStartupPermissions] = useState(true)
   const [gestureSetupForm, setGestureSetupForm] = useState(null) // { preset, name, action, phrase }
   const [trainingUiTick, setTrainingUiTick] = useState(0)
@@ -520,6 +653,7 @@ function App() {
   const cameraStreamRef = useRef(null)
   const micStreamRef = useRef(null)
   const micFrameRef = useRef(null)
+  const cameraFeedRetryRef = useRef(null)
   const engineStatusRef = useRef(engineStatus)
   const prevEngineRunningRef = useRef(engineStatus.running)
 
@@ -545,14 +679,19 @@ function App() {
       .map(
       ([index, item]) => {
         const actionLabel = describeDefaultAction(item.action || 'Custom Action')
+        const metadata = DEFAULT_GESTURE_DETAILS[item.name] || {}
         const enabled = !disabledDefaults.has(item.name) && !disabledDefaults.has(actionLabel)
         return {
           id: `static-${index}`,
-          title: item.name || `Static Gesture ${index}`,
-          subtitle: actionLabel,
+          title: metadata.title || item.name || `Static Gesture ${index}`,
+          subtitle: metadata.subtitle || actionLabel,
           engineGestureName: item.name,
           type: 'hand',
-          family: 'Static Command Family',
+          family: metadata.family || 'Static Command Family',
+          gestureDescription: metadata.subtitle || actionLabel,
+          howTo: metadata.howTo || [],
+          contextActions: metadata.contextActions || null,
+          defaultSection: metadata.defaultSection || 'single',
           controlModel: 'static',
           defaultAction: actionLabel,
           enabled,
@@ -567,13 +706,19 @@ function App() {
       .map(
       ([index, item]) => {
         const actionLabel = describeDefaultAction(item.action || `Dynamic Gesture ${index}`)
+        const metadata = DEFAULT_GESTURE_DETAILS[item.name] || {}
         const enabled = !disabledDefaults.has(item.name) && !disabledDefaults.has(actionLabel)
         return {
           id: `dynamic-${index}`,
-          title: item.name || `Dynamic Gesture ${index}`,
-          subtitle: actionLabel,
+          title: metadata.title || item.name || `Dynamic Gesture ${index}`,
+          subtitle: metadata.subtitle || actionLabel,
+          engineGestureName: item.name,
           type: 'hand',
-          family: 'Dynamic Control Family',
+          family: metadata.family || 'Dynamic Control Family',
+          gestureDescription: metadata.subtitle || actionLabel,
+          howTo: metadata.howTo || [],
+          contextActions: metadata.contextActions || null,
+          defaultSection: metadata.defaultSection || 'context',
           controlModel: 'dynamic',
           defaultAction: actionLabel,
           enabled,
@@ -1143,15 +1288,13 @@ function App() {
   const defaultFeatureGestures = filteredGestures.filter((item) => item.locked)
   const customFeatureGestures = filteredGestures.filter((item) => !item.locked)
   const visibleDefaultGestures =
-    hasSearchQuery || showAllDefaultGestures
-      ? defaultFeatureGestures
-      : defaultFeatureGestures.slice(0, DEFAULT_LIBRARY_VISIBLE)
-  const canShowMoreDefaults =
-    !hasSearchQuery && defaultFeatureGestures.length > visibleDefaultGestures.length
-  const canShowLessDefaults =
-    !hasSearchQuery &&
-    showAllDefaultGestures &&
-    defaultFeatureGestures.length > DEFAULT_LIBRARY_VISIBLE
+    hasSearchQuery || showAllDefaultGestures ? defaultFeatureGestures : defaultFeatureGestures
+  const contextAwareDefaultGestures = visibleDefaultGestures.filter(
+    (item) => item.defaultSection === 'context'
+  )
+  const singleActionDefaultGestures = visibleDefaultGestures.filter(
+    (item) => item.defaultSection !== 'context'
+  )
 
   const actionMappingState = useMemo(() => {
     const state = {}
@@ -1309,13 +1452,21 @@ function App() {
 
   useEffect(() => {
     setCameraFeedError(false)
+    setCameraFeedFailureCount(0)
     setCameraFeedNonce((value) => value + 1)
-  }, [trainingSession?.gestureId, trainingSession?.source, engineStatus?.mode])
+  }, [trainingSession?.gestureId, engineStatus?.mode])
 
   useEffect(() => {
     if (tab !== 'live-monitoring') return
     setCameraFeedError(false)
+    setCameraFeedFailureCount(0)
     setCameraFeedNonce((value) => value + 1)
+    return () => {
+      if (cameraFeedRetryRef.current) {
+        clearTimeout(cameraFeedRetryRef.current)
+        cameraFeedRetryRef.current = null
+      }
+    }
   }, [tab, engineOwnsCamera, engineStatus?.mode])
 
   useEffect(() => {
@@ -1323,7 +1474,7 @@ function App() {
     const retry = setInterval(() => {
       setCameraFeedError(false)
       setCameraFeedNonce((value) => value + 1)
-    }, 2500)
+    }, 1200)
     return () => clearInterval(retry)
   }, [cameraFeedError])
 
@@ -1829,6 +1980,17 @@ function App() {
   const renderGestureDemo = (gesture) => {
     if (!gesture) return null
     const sceneMap = {
+      Fist: 'fist-play-pause',
+      Thumb: 'thumbs-up-mute',
+      OK_Sign: 'ok-sign-confirm',
+      Index_Pointing: 'cursor-control',
+      Open_Palm_Fingers_Pointing_Moving_Vertically: 'magnitude-control',
+      Pinch_Closed: 'grab-drag',
+      Two_Fingers_Extended_Pointing_Moving_Vertically: 'scroll-control',
+      Circular_Clockwise: 'rotation-dial',
+      Circular_Counter_Clockwise: 'rotation-dial',
+      Swipe_Left: 'navigation-control',
+      Swipe_Right: 'navigation-control',
       'dyn-magnitude-control': 'magnitude-control',
       'dyn-cursor-control': 'cursor-control',
       'dyn-grab-drag': 'grab-drag',
@@ -1859,7 +2021,9 @@ function App() {
     }
 
     const scene =
-      sceneMap[gesture.id] || (gesture.type === 'voice' ? 'voice-next-window' : 'magnitude-control')
+      sceneMap[gesture.engineGestureName] ||
+      sceneMap[gesture.id] ||
+      (gesture.type === 'voice' ? 'voice-next-window' : 'magnitude-control')
 
     const renderHand = (variant = 'open') => (
       <div className={`guide-hand ${variant}`}>
@@ -2045,6 +2209,11 @@ function App() {
         <h3>{item.title}</h3>
         <p>{item.subtitle}</p>
         {item.family ? <small className="gesture-family">{item.family}</small> : null}
+        {item.contextActions ? (
+          <small className="gesture-phrase">
+            Contexts: {Object.keys(item.contextActions).join(' · ')}
+          </small>
+        ) : null}
         {item.type === 'voice' && item.phrase ? (
           <small className="gesture-phrase">Trigger: &ldquo;{item.phrase}&rdquo;</small>
         ) : null}
@@ -2304,39 +2473,35 @@ function App() {
             <>
               <section className="gesture-section">
                 <header className="gesture-section-head">
-                  <h3>Default Features</h3>
-                  <span>{defaultFeatureGestures.length}</span>
+                  <h3>Context-Aware Families</h3>
+                  <span>{contextAwareDefaultGestures.length}</span>
                 </header>
-                {visibleDefaultGestures.length > 0 ? (
+                {contextAwareDefaultGestures.length > 0 ? (
                   <div className="gesture-grid">
-                    {visibleDefaultGestures.map((item) => renderGestureCard(item))}
+                    {contextAwareDefaultGestures.map((item) => renderGestureCard(item))}
                   </div>
                 ) : (
-                  <div className="empty-state-card">No default features match this search.</div>
+                  <div className="empty-state-card">No context-aware defaults match this search.</div>
                 )}
-                {canShowMoreDefaults ? (
-                  <button
-                    className="secondary-btn show-more-btn"
-                    type="button"
-                    onClick={() => setShowAllDefaultGestures(true)}
-                  >
-                    Show More Default Features
-                  </button>
-                ) : null}
-                {canShowLessDefaults ? (
-                  <button
-                    className="secondary-btn show-more-btn"
-                    type="button"
-                    onClick={() => setShowAllDefaultGestures(false)}
-                  >
-                    Show Less
-                  </button>
-                ) : null}
               </section>
 
               <section className="gesture-section">
                 <header className="gesture-section-head">
-                  <h3>Custom Features</h3>
+                  <h3>Single-Action Defaults</h3>
+                  <span>{singleActionDefaultGestures.length}</span>
+                </header>
+                {singleActionDefaultGestures.length > 0 ? (
+                  <div className="gesture-grid">
+                    {singleActionDefaultGestures.map((item) => renderGestureCard(item))}
+                  </div>
+                ) : (
+                  <div className="empty-state-card">No single-action defaults match this search.</div>
+                )}
+              </section>
+
+              <section className="gesture-section">
+                <header className="gesture-section-head">
+                  <h3>Custom Gestures</h3>
                   <span>{customFeatureGestures.length}</span>
                 </header>
                 {customFeatureGestures.length > 0 ? (
@@ -2365,7 +2530,26 @@ function App() {
                       className="preview-video"
                       src={`http://127.0.0.1:5000/video_feed?v=${cameraFeedNonce}`}
                       alt={trainingSession ? 'Training Stream' : 'Engine Stream'}
-                      onError={() => setCameraFeedError(true)}
+                      onLoad={() => {
+                        setCameraFeedError(false)
+                        setCameraFeedFailureCount(0)
+                      }}
+                      onError={() => {
+                        setCameraFeedFailureCount((count) => {
+                          const nextCount = count + 1
+                          if (cameraFeedRetryRef.current) {
+                            clearTimeout(cameraFeedRetryRef.current)
+                          }
+                          if (nextCount < 3) {
+                            cameraFeedRetryRef.current = setTimeout(() => {
+                              setCameraFeedNonce((value) => value + 1)
+                            }, 450)
+                            return nextCount
+                          }
+                          setCameraFeedError(true)
+                          return nextCount
+                        })
+                      }}
                     />
                   ) : (
                     <div className="camera-fallback">
@@ -3027,6 +3211,16 @@ function App() {
                     </li>
                   ) : null}
                 </ul>
+                {selectedGesture.contextActions ? (
+                  <div className="guide-context-groups">
+                    {Object.entries(selectedGesture.contextActions).map(([domain, action]) => (
+                      <div key={`${selectedGesture.id}-${domain}`} className="guide-context-group">
+                        <strong>{domain}</strong>
+                        <span>{action}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <p className="guide-readonly-note">
                   Default actions are locked. Create a custom gesture if you want to modify
                   behavior.

@@ -1,21 +1,17 @@
 {
   "static": {
-    "0": {"name": "DRS_T_Frame", "action": "None"},
-    "1": {"name": "Fist", "action": "Context: Fist"},
-    "2": {"name": "Index_Pointing", "action": "Mode: Cursor Control"},
-    "3": {"name": "Neutral", "action": "None"},
-    "4": {"name": "OK_Sign", "action": "Confirm / Enter"},
-    "5": {"name": "Open_Palm_Fingers_Pointing_Moving_Vertically", "action": "Mode: Context Slider"},
-    "6": {"name": "Pinch_Closed", "action": "Mode: Context Drag"},
-    "7": {"name": "Thumb", "action": "Mute / Unmute"},
-    "8": {"name": "Two_Fingers_Extended_Pointing_Moving_Vertically", "action": "Mode: Context Vertical"},
-    "9": {"name": "V_Sign", "action": "None"}
+    "0": {"name": "Fist", "action": "Context: Fist"},
+    "1": {"name": "Index_Pointing", "action": "Mode: Cursor Control"},
+    "2": {"name": "OK_Sign", "action": "Confirm / Enter"},
+    "3": {"name": "Open_Palm_Fingers_Pointing_Moving_Vertically", "action": "Mode: Context Slider"},
+    "4": {"name": "Pinch_Closed", "action": "Mode: Context Drag"},
+    "5": {"name": "Thumb", "action": "Mute / Unmute"},
+    "6": {"name": "Two_Fingers_Extended_Pointing_Moving_Vertically", "action": "Mode: Context Vertical"}
   },
   "dynamic": {
     "0": {"name": "Circular_Clockwise", "action": "Context: Dial Clockwise"},
     "1": {"name": "Circular_Counter_Clockwise", "action": "Context: Dial Counter Clockwise"},
-    "2": {"name": "Push_Forward", "action": "None"},
-    "3": {"name": "Swipe_Left", "action": "Context: Swipe Left"},
-    "4": {"name": "Swipe_Right", "action": "Context: Swipe Right"}
+    "2": {"name": "Swipe_Left", "action": "Context: Swipe Left"},
+    "3": {"name": "Swipe_Right", "action": "Context: Swipe Right"}
   }
 }
