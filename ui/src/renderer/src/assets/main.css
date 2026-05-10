@@ -1386,7 +1386,7 @@ textarea:focus-visible {
   position: fixed;
   inset: 0;
   background: rgba(12, 20, 34, 0.46);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   z-index: 20;
@@ -1400,7 +1400,7 @@ textarea:focus-visible {
   border-radius: 16px;
   padding: 16px;
   box-shadow:
-    0 20px 46px rgba(12, 20, 34, 0.3),
+    0 18px 34px rgba(12, 20, 34, 0.24),
     0 0 0 1px rgba(255, 255, 255, 0.55) inset;
   animation: modal-pop 120ms ease-out;
 }
@@ -1521,7 +1521,7 @@ textarea:focus-visible {
 .add-section {
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  background: linear-gradient(180deg, rgba(252, 254, 255, 0.96), var(--card-bg));
+  background: var(--card-bg);
   padding: 10px;
 }
 
@@ -1543,7 +1543,7 @@ textarea:focus-visible {
 .type-card {
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), var(--card-bg));
+  background: var(--card-bg);
   color: var(--text-main);
   padding: 14px 12px;
   text-align: left;
@@ -1591,8 +1591,8 @@ textarea:focus-visible {
 
 .type-card:hover {
   border-color: #9fbbed;
-  box-shadow: 0 8px 16px rgba(14, 113, 235, 0.1);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 12px rgba(14, 113, 235, 0.08);
+  transform: none;
 }
 
 .modal-cancel {
@@ -3085,7 +3085,8 @@ textarea:focus-visible {
 }
 
 :root[data-theme='dark'] .modal-backdrop {
-  background: rgba(3, 8, 18, 0.62);
+  background: rgba(6, 10, 18, 0.82);
+  backdrop-filter: none;
 }
 
 :root[data-theme='dark'] .gesture-type-tag {
@@ -3153,7 +3154,7 @@ textarea:focus-visible {
 
 :root[data-theme='dark'] .add-section {
   border-color: #364966;
-  background: #121a28;
+  background: #182334;
 }
 
 :root[data-theme='dark'] .add-section h4 {
@@ -3180,6 +3181,16 @@ textarea:focus-visible {
 
 :root[data-theme='dark'] .type-card em {
   color: #9cc7ff;
+}
+
+:root[data-theme='dark'] .type-card {
+  background: #152131;
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .type-card:hover {
+  background: #1a283b;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 :root[data-theme='dark'] .setup-steps span {
@@ -3323,8 +3334,9 @@ textarea:focus-visible {
 }
 
 :root[data-theme='dark'] .modal-card {
+  background: #131d2d;
   box-shadow:
-    0 24px 52px rgba(0, 0, 0, 0.42),
+    0 18px 36px rgba(0, 0, 0, 0.34),
     0 0 0 1px rgba(255, 255, 255, 0.05) inset;
 }
 

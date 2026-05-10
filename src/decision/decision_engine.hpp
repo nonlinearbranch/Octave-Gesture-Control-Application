@@ -1,10 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "bus/event_bus.hpp"
 #include "core/continuous_action.hpp"
@@ -21,6 +22,7 @@ public:
         int hand_id{0};
         core::ContinuousDomain domain{core::ContinuousDomain::Adjust};
         bool is_active{false};
+        std::chrono::steady_clock::time_point last_update{};
     };
 
     DecisionEngine(
@@ -37,6 +39,8 @@ private:
     static const char* action_message(core::IntentKind intent);
     static const char* adjusting_message(core::ContinuousDomain domain);
     static const char* voice_action_message(const core::IntentEvent& intent);
+    std::string resolve_discrete_action(const core::IntentEvent& intent) const;
+    core::ContinuousDomain resolve_continuous_domain(const core::IntentEvent& intent) const;
     core::ContinuousDomain domain_for_context() const;
     void handle_mode_transition(runtime::InteractionMode new_mode);
     void handle_context_update(const core::ContextSnapshot& context);
@@ -50,7 +54,8 @@ private:
     void emit_update_for_hand(
         int hand_id,
         const core::EventHeader& header,
-        float delta);
+        const core::IntentEvent& intent,
+        core::ContinuousDomain domain);
     void emit_stop_for_hand(
         int hand_id,
         const core::EventHeader& header);
@@ -71,6 +76,7 @@ private:
     core::ContextSnapshot latest_context_{};
     std::uint64_t next_interaction_id_{1};
     runtime::InteractionMode current_mode_{runtime::InteractionMode::HAND};
+    std::chrono::milliseconds interaction_idle_timeout_{500};
 };
 
 }  // namespace spider::decision

@@ -5,6 +5,7 @@
 
 #include "action/desktop_actions.hpp"
 #include "core/logging.hpp"
+#include "heuristics/HeuristicsTracker.hpp"
 
 namespace spider::action {
 
@@ -14,7 +15,8 @@ ActionExecutor::ActionExecutor(
     bus::Subscriber<core::ContinuousActionStop> stop_subscriber)
     : start_subscriber_(std::move(start_subscriber)),
       update_subscriber_(std::move(update_subscriber)),
-      stop_subscriber_(std::move(stop_subscriber)) {}
+      stop_subscriber_(std::move(stop_subscriber)),
+      heuristics_tracker_(std::make_shared<spider::heuristics::HeuristicsTracker>()) {}
 
 void ActionExecutor::run(std::atomic<bool>& running) {
     core::ContinuousActionStart start{};
@@ -77,7 +79,19 @@ void ActionExecutor::process_update(const core::ContinuousActionUpdate& update) 
         return;
     }
 
-    desktop_actions::apply_continuous_update(update.domain, update.delta);
+    if (update.domain == core::ContinuousDomain::Cursor) {
+        if (heuristics_tracker_) {
+            heuristics_tracker_->process_payload(
+                update.source_label,
+                update.semantic_label,
+                update.index_x,
+                update.index_y,
+                update.thumb_x,
+                update.thumb_y);
+        }
+    } else {
+        desktop_actions::apply_continuous_update(update.domain, update.delta);
+    }
 
     core::log_line(
         "[Action Update] Interaction ",
@@ -99,6 +113,10 @@ void ActionExecutor::process_stop(const core::ContinuousActionStop& stop) {
         stop.interaction_id,
         " Domain ",
         core::to_string(stop.domain));
+
+    if (heuristics_tracker_) {
+        heuristics_tracker_->enter_idle();
+    }
 
     active_execution_ = ActiveExecution{};
 }

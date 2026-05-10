@@ -2,9 +2,14 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 #include "bus/event_bus.hpp"
 #include "core/continuous_action.hpp"
+
+namespace spider::heuristics {
+class HeuristicsTracker;
+}
 
 namespace spider::action {
 
@@ -32,6 +37,7 @@ private:
     bus::Subscriber<core::ContinuousActionUpdate> update_subscriber_;
     bus::Subscriber<core::ContinuousActionStop> stop_subscriber_;
     ActiveExecution active_execution_{};
+    std::shared_ptr<spider::heuristics::HeuristicsTracker> heuristics_tracker_;
 };
 
 }  // namespace spider::action

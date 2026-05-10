@@ -179,6 +179,77 @@ class DynamicInferenceRunner:
             self._model = None
             self._last_error = f"Failed to load dynamic model '{self._model_path}': {exc}"
 
+    def infer_sequence(self, sequence: list[list[float]]) -> DynamicInferenceResult:
+        """
+        Run one bounded dynamic classification on a completed gesture sequence.
+
+        This is the missing piece between a rolling buffer and a real gesture
+        episode. The service can now collect motion from clutch-on to motion-end,
+        then classify once and reset cleanly.
+        """
+
+        if self._model is None:
+            return DynamicInferenceResult(
+                label_idx=-1,
+                label_name="UNKNOWN",
+                confidence=0.0,
+                is_unknown=True,
+            )
+
+        if not sequence:
+            return DynamicInferenceResult(
+                label_idx=-1,
+                label_name="UNKNOWN",
+                confidence=0.0,
+                is_unknown=True,
+            )
+
+        try:
+            prepared_sequence = [list(frame) for frame in sequence]
+            if len(prepared_sequence) > self._sequence_length:
+                prepared_sequence = prepared_sequence[-self._sequence_length :]
+            while len(prepared_sequence) < self._sequence_length:
+                prepared_sequence.append(list(prepared_sequence[-1]))
+
+            x = torch.tensor(prepared_sequence, dtype=torch.float32).unsqueeze(0)
+            if tuple(x.shape) != (1, self._sequence_length, self._feature_size):
+                self._last_error = (
+                    "Dynamic sequence tensor has unexpected shape: "
+                    f"{tuple(x.shape)}; expected "
+                    f"(1, {self._sequence_length}, {self._feature_size})."
+                )
+                return DynamicInferenceResult(
+                    label_idx=-1,
+                    label_name="UNKNOWN",
+                    confidence=0.0,
+                    is_unknown=True,
+                )
+
+            with torch.no_grad():
+                logits = self._model(x)
+                probs = F.softmax(logits, dim=1)
+                confidence_tensor, pred_tensor = torch.max(probs, dim=1)
+
+            confidence = float(confidence_tensor.item())
+            label_idx = int(pred_tensor.item())
+            label_name = self._label_map.get(label_idx, "UNKNOWN")
+            is_unknown = confidence < self._confidence_threshold or label_name == "UNKNOWN"
+
+            return DynamicInferenceResult(
+                label_idx=-1 if is_unknown else label_idx,
+                label_name="UNKNOWN" if is_unknown else label_name,
+                confidence=confidence,
+                is_unknown=is_unknown,
+            )
+        except Exception as exc:
+            self._last_error = f"Dynamic inference failed: {exc}"
+            return DynamicInferenceResult(
+                label_idx=-1,
+                label_name="UNKNOWN",
+                confidence=0.0,
+                is_unknown=True,
+            )
+
     def infer(self, buffer: SequenceBuffer) -> DynamicInferenceResult:
         """
         Run dynamic inference only when the sequence buffer is full.
@@ -204,54 +275,7 @@ class DynamicInferenceRunner:
                 is_unknown=True,
             )
 
-        try:
-            sequence = buffer.to_list()
-            x = torch.tensor(sequence, dtype=torch.float32).unsqueeze(0)
-            if tuple(x.shape) != (1, self._sequence_length, self._feature_size):
-                self._last_error = (
-                    "Dynamic sequence tensor has unexpected shape: "
-                    f"{tuple(x.shape)}; expected "
-                    f"(1, {self._sequence_length}, {self._feature_size})."
-                )
-                return DynamicInferenceResult(
-                    label_idx=-1,
-                    label_name="UNKNOWN",
-                    confidence=0.0,
-                    is_unknown=True,
-                )
-
-            with torch.no_grad():
-                logits = self._model(x)
-                probs = F.softmax(logits, dim=1)
-                confidence_tensor, pred_tensor = torch.max(probs, dim=1)
-
-            confidence = float(confidence_tensor.item())
-            label_idx = int(pred_tensor.item())
-            label_name = self._label_map.get(label_idx, "UNKNOWN")
-            is_unknown = confidence < self._confidence_threshold or label_name == "UNKNOWN"
-
-            result = DynamicInferenceResult(
-                label_idx=-1 if is_unknown else label_idx,
-                label_name="UNKNOWN" if is_unknown else label_name,
-                confidence=confidence,
-                is_unknown=is_unknown,
-            )
-
-            # Clear the sequence only after a successful recognized gesture.
-            # This avoids immediately re-emitting the same motion from the same
-            # buffered 30-frame window.
-            if not result.is_unknown:
-                buffer.clear()
-
-            return result
-        except Exception as exc:
-            self._last_error = f"Dynamic inference failed: {exc}"
-            return DynamicInferenceResult(
-                label_idx=-1,
-                label_name="UNKNOWN",
-                confidence=0.0,
-                is_unknown=True,
-            )
+        return self.infer_sequence(buffer.to_list())
 
     def get_last_error(self) -> str:
         """Return the most recent dynamic model error, if any."""

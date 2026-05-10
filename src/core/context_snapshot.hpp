@@ -11,7 +11,11 @@ enum class ContextMode {
     Browser,
     Media,
     Editor,
-    Desktop
+    Desktop,
+    Presentation,
+    Conferencing,
+    Gaming,
+    Design
 };
 
 inline const char* to_string(const ContextMode mode) {
@@ -26,6 +30,14 @@ inline const char* to_string(const ContextMode mode) {
         return "Editor";
     case ContextMode::Desktop:
         return "Desktop";
+    case ContextMode::Presentation:
+        return "Presentation";
+    case ContextMode::Conferencing:
+        return "Conferencing";
+    case ContextMode::Gaming:
+        return "Gaming";
+    case ContextMode::Design:
+        return "Design";
     default:
         return "Unknown";
     }

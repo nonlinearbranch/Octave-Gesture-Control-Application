@@ -1,5 +1,4 @@
 #include "ipc/python_ml_service_client.hpp"
-#include "heuristics/HeuristicsTracker.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -245,26 +244,17 @@ bool PythonMlServiceClient::handle_line(const std::string& line) {
         const float thumb_y = extract_nested_float(line, "thumb_tip", "y", NAN);
         const float confidence = extract_float(line, "confidence", 0.0F);
 
-        if (action.find("Mode:") == 0) {
-            // Continuous action -> feed to heuristics tracker, bypass discrete publisher
-            if (heuristics_tracker_) {
-                heuristics_tracker_->process_payload(label, action, index_x, index_y, thumb_x, thumb_y);
-            }
-            core::log_line("[IPC] Continuous Mode ", action, " confidence=", confidence);
-            return true;
-        }
-
-        // Discrete action
-        if (heuristics_tracker_) {
-            heuristics_tracker_->enter_idle();
-        }
-
         core::GestureEvent event{};
         event.header.sequence_number = sequence_number_++;
         event.header.timestamp = std::chrono::steady_clock::now();
         event.label = label;
         event.confidence = confidence;
         event.hand_id = 1;
+        event.value = extract_float(line, "value", confidence - 0.75F);
+        event.index_x = index_x;
+        event.index_y = index_y;
+        event.thumb_x = thumb_x;
+        event.thumb_y = thumb_y;
         gesture_publisher_.publish(event);
         core::log_line("[IPC] Gesture ", event.label, " ", event.confidence,
                        " action=", action, " mode=", mode.empty() ? "unknown" : mode);

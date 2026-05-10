@@ -250,6 +250,17 @@ const ENGINE_ACTION_TO_UI_ACTION = {
   MiddleClick: 'Middle Click'
 }
 
+const DEFAULT_CONTEXT_ACTION_LABELS = {
+  'Context: Fist': 'Context-aware Fist',
+  'Context: Swipe Left': 'Context-aware Swipe Left',
+  'Context: Swipe Right': 'Context-aware Swipe Right',
+  'Context: Dial Clockwise': 'Context-aware Dial Clockwise',
+  'Context: Dial Counter Clockwise': 'Context-aware Dial Counter Clockwise',
+  'Mode: Context Slider': 'Context Slider',
+  'Mode: Context Vertical': 'Context Vertical',
+  'Mode: Context Drag': 'Context Drag'
+}
+
 const getDefaultEngineGestureNames = (config = { default_mapping: { static: {} } }) =>
   new Set(
     Object.values(config.default_mapping?.static || {})
@@ -279,6 +290,9 @@ const describeEngineAction = (action) => {
   if (kind === 'open_path') return 'Open Folder'
   return 'Custom Action'
 }
+
+const describeDefaultAction = (action) =>
+  DEFAULT_CONTEXT_ACTION_LABELS[action] || describeEngineAction(action)
 
 const describeGestureType = (item) => {
   if (item.type === 'voice') {
@@ -526,9 +540,11 @@ function App() {
       return false
     }
 
-    const staticGestures = Object.entries(normalized.default_mapping?.static || {}).map(
+    const staticGestures = Object.entries(normalized.default_mapping?.static || {})
+      .filter(([, item]) => item?.action && item.action !== 'None')
+      .map(
       ([index, item]) => {
-        const actionLabel = item.action || 'Custom Action'
+        const actionLabel = describeDefaultAction(item.action || 'Custom Action')
         const enabled = !disabledDefaults.has(item.name) && !disabledDefaults.has(actionLabel)
         return {
           id: `static-${index}`,
@@ -546,14 +562,16 @@ function App() {
       }
     )
 
-    const dynamicGestures = Object.entries(normalized.default_mapping?.dynamic || {}).map(
+    const dynamicGestures = Object.entries(normalized.default_mapping?.dynamic || {})
+      .filter(([, item]) => item?.action && item.action !== 'None')
+      .map(
       ([index, item]) => {
-        const actionLabel = item.action || `Dynamic Gesture ${index}`
+        const actionLabel = describeDefaultAction(item.action || `Dynamic Gesture ${index}`)
         const enabled = !disabledDefaults.has(item.name) && !disabledDefaults.has(actionLabel)
         return {
           id: `dynamic-${index}`,
-          title: actionLabel,
-          subtitle: item.name || `Dynamic Gesture ${index}`,
+          title: item.name || `Dynamic Gesture ${index}`,
+          subtitle: actionLabel,
           type: 'hand',
           family: 'Dynamic Control Family',
           controlModel: 'dynamic',

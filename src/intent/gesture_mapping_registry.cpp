@@ -181,7 +181,7 @@ std::unordered_map<std::string, GestureBinding> parse_model_mapping_section(cons
         const auto object_text = section.substr(object_start, object_end - object_start + 1);
         const auto name = extract_json_string_value(object_text, "name");
         const auto action = extract_json_string_value(object_text, "action");
-        if (!name.empty()) {
+        if (!name.empty() && action != "None") {
             const std::string resolved_action = action.empty() ? "Click" : action;
             result[name] = GestureBinding{intent_for_action(resolved_action), resolved_action};
         }
@@ -341,6 +341,9 @@ std::optional<GestureBinding> GestureMappingRegistry::resolve_gesture(const std:
     }
     const auto it = gesture_mappings_.find(label);
     if (it == gesture_mappings_.end()) {
+        return std::nullopt;
+    }
+    if (it->second.action == "None") {
         return std::nullopt;
     }
     return it->second;
@@ -518,13 +521,25 @@ void GestureMappingRegistry::save() const {
     std::filesystem::create_directories(config_dir);
     const std::filesystem::path output_path = config_dir / "user_mapping.json";
     std::unordered_map<std::string, int> existing_indices;
+    std::unordered_map<std::string, int> existing_dynamic_indices;
+    std::unordered_map<std::string, std::string> existing_dynamic_actions;
     std::string existing_contents;
     if (load_file_text(output_path, existing_contents)) {
         existing_indices = parse_model_mapping_indices(extract_json_section(existing_contents, "static"));
+        existing_dynamic_indices = parse_model_mapping_indices(extract_json_section(existing_contents, "dynamic"));
+        const auto dynamic_section = extract_json_section(existing_contents, "dynamic");
+        const auto parsed_dynamic = parse_model_mapping_section(dynamic_section);
+        for (const auto& entry : parsed_dynamic) {
+            existing_dynamic_actions[entry.first] = entry.second.action;
+        }
     }
     int next_index = 0;
+    int next_dynamic_index = 0;
     for (const auto& entry : existing_indices) {
         next_index = std::max(next_index, entry.second + 1);
+    }
+    for (const auto& entry : existing_dynamic_indices) {
+        next_dynamic_index = std::max(next_dynamic_index, entry.second + 1);
     }
 
     std::ofstream output(output_path, std::ios::trunc);
@@ -555,7 +570,24 @@ void GestureMappingRegistry::save() const {
     }
     output << "\n  },\n";
 
-    output << "  \"dynamic\": {},\n";
+    output << "  \"dynamic\": {\n";
+    bool first_dynamic = true;
+    for (const auto& entry : existing_dynamic_actions) {
+        int label_index = next_dynamic_index++;
+        const auto existing = existing_dynamic_indices.find(entry.first);
+        if (existing != existing_dynamic_indices.end()) {
+            label_index = existing->second;
+        }
+        if (!first_dynamic) {
+            output << ",\n";
+        }
+        first_dynamic = false;
+        output << "    \"" << label_index << "\": {\n";
+        output << "      \"name\": \"" << escape_json_string(entry.first) << "\"";
+        output << ",\n      \"action\": \"" << escape_json_string(entry.second) << "\"\n";
+        output << "    }";
+    }
+    output << "\n  },\n";
 
     output << "  \"voice_actions\": {\n";
     bool first_voice = true;

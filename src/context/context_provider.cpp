@@ -1,5 +1,6 @@
 #include "context/context_provider.hpp"
 
+#include <cctype>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -42,7 +43,6 @@ std::string get_foreground_process_name() {
         if (slash != std::string::npos) {
             name = name.substr(slash + 1);
         }
-        // Lowercase for matching
         for (auto& ch : name) {
             ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         }
@@ -64,7 +64,37 @@ std::string get_foreground_window_title() {
 }
 
 core::ContextMode classify_process(const std::string& process_name) {
-    // Browsers
+    if (process_name.find("powerpnt") != std::string::npos ||
+        process_name.find("keynote") != std::string::npos ||
+        process_name.find("impress") != std::string::npos) {
+        return core::ContextMode::Presentation;
+    }
+
+    if (process_name.find("zoom") != std::string::npos ||
+        process_name.find("teams") != std::string::npos ||
+        process_name.find("webex") != std::string::npos ||
+        process_name.find("slack") != std::string::npos ||
+        process_name.find("discord") != std::string::npos) {
+        return core::ContextMode::Conferencing;
+    }
+
+    if (process_name.find("photoshop") != std::string::npos ||
+        process_name.find("illustrator") != std::string::npos ||
+        process_name.find("figma") != std::string::npos ||
+        process_name.find("blender") != std::string::npos ||
+        process_name.find("sketch") != std::string::npos) {
+        return core::ContextMode::Design;
+    }
+
+    if (process_name.find("steam") != std::string::npos ||
+        process_name.find("epicgameslauncher") != std::string::npos ||
+        process_name.find("riotclient") != std::string::npos ||
+        process_name.find("valorant") != std::string::npos ||
+        process_name.find("cs2") != std::string::npos ||
+        process_name.find("dota") != std::string::npos) {
+        return core::ContextMode::Gaming;
+    }
+
     if (process_name.find("chrome") != std::string::npos ||
         process_name.find("firefox") != std::string::npos ||
         process_name.find("msedge") != std::string::npos ||
@@ -76,7 +106,6 @@ core::ContextMode classify_process(const std::string& process_name) {
         return core::ContextMode::Browser;
     }
 
-    // Media players
     if (process_name.find("vlc") != std::string::npos ||
         process_name.find("spotify") != std::string::npos ||
         process_name.find("wmplayer") != std::string::npos ||
@@ -86,7 +115,6 @@ core::ContextMode classify_process(const std::string& process_name) {
         return core::ContextMode::Media;
     }
 
-    // Editors / IDEs
     if (process_name.find("code") != std::string::npos ||
         process_name.find("devenv") != std::string::npos ||
         process_name.find("notepad") != std::string::npos ||
@@ -96,7 +124,6 @@ core::ContextMode classify_process(const std::string& process_name) {
         return core::ContextMode::Editor;
     }
 
-    // Everything else → Desktop
     return core::ContextMode::Desktop;
 }
 
@@ -138,7 +165,6 @@ void ContextProvider::run(std::atomic<bool>& running) {
             previous_mode = mode;
         }
 
-        // Poll every 500ms — foreground window changes are low-frequency
         for (int step = 0; step < 5 && running.load(); ++step) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

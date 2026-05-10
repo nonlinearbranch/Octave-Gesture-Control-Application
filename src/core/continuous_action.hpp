@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "core/event_header.hpp"
 
 namespace spider::core {
@@ -11,7 +13,8 @@ enum class ContinuousDomain {
     ScrollSpeed,
     Volume,
     Zoom,
-    Brightness
+    Brightness,
+    Timeline
 };
 
 inline const char* to_string(const ContinuousDomain domain) {
@@ -30,6 +33,8 @@ inline const char* to_string(const ContinuousDomain domain) {
         return "Zoom";
     case ContinuousDomain::Brightness:
         return "Brightness";
+    case ContinuousDomain::Timeline:
+        return "Timeline";
     default:
         return "Unknown";
     }
@@ -48,6 +53,12 @@ struct ContinuousActionUpdate {
     int hand_id{0};
     ContinuousDomain domain{ContinuousDomain::Adjust};
     float delta{0.0F};
+    std::string source_label{};
+    std::string semantic_label{};
+    float index_x{0.0F};
+    float index_y{0.0F};
+    float thumb_x{0.0F};
+    float thumb_y{0.0F};
 };
 
 struct ContinuousActionStop {

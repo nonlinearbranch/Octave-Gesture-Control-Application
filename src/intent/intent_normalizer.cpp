@@ -85,7 +85,11 @@ void IntentNormalizer::run(std::atomic<bool>& running) {
             intent.source = core::InputSource::Gesture;
             intent.source_label = gesture.label;
             intent.semantic_label = binding->action;
-            intent.value = gesture.confidence - 0.75F;
+            intent.value = gesture.value;
+            intent.index_x = gesture.index_x;
+            intent.index_y = gesture.index_y;
+            intent.thumb_x = gesture.thumb_x;
+            intent.thumb_y = gesture.thumb_y;
 
             if (intent_publisher_.publish(intent)) {
                 core::log_line("[Intent] ", core::to_string(intent.intent));

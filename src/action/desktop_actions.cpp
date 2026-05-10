@@ -92,8 +92,7 @@ int compute_step_count(const float delta) {
 }
 
 void adjust_brightness_step(const int steps) {
-    const HMONITOR monitor = MonitorFromWindow(
-        GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+    const HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
     if (!monitor) {
         return;
     }
@@ -111,16 +110,12 @@ void adjust_brightness_step(const int steps) {
     DWORD min_brightness = 0;
     DWORD cur_brightness = 0;
     DWORD max_brightness = 0;
-    if (GetMonitorBrightness(physical.hPhysicalMonitor,
-                             &min_brightness, &cur_brightness, &max_brightness)) {
+    if (GetMonitorBrightness(physical.hPhysicalMonitor, &min_brightness, &cur_brightness, &max_brightness)) {
         const int range = static_cast<int>(max_brightness - min_brightness);
-        const int increment = std::max(1, range / 20);  // ~5% per step
+        const int increment = std::max(1, range / 20);
         int target = static_cast<int>(cur_brightness) + steps * increment;
-        target = std::clamp(target,
-                            static_cast<int>(min_brightness),
-                            static_cast<int>(max_brightness));
-        SetMonitorBrightness(physical.hPhysicalMonitor,
-                             static_cast<DWORD>(target));
+        target = std::clamp(target, static_cast<int>(min_brightness), static_cast<int>(max_brightness));
+        SetMonitorBrightness(physical.hPhysicalMonitor, static_cast<DWORD>(target));
     }
 
     DestroyPhysicalMonitors(1, &physical);
@@ -134,6 +129,7 @@ bool execute_discrete_action(const std::string& action_id) {
     (void)action_id;
     return false;
 #else
+    if (action_id == "None" || action_id.empty()) return false;
     if (action_id == "Click") {
         send_mouse_click(MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
         return true;
@@ -191,6 +187,16 @@ bool execute_discrete_action(const std::string& action_id) {
         send_key_press(VK_MEDIA_PLAY_PAUSE);
         return true;
     }
+    if (action_id == "Undo") {
+        const WORD modifiers[] = {VK_CONTROL};
+        send_key_combo(modifiers, 1, 'Z');
+        return true;
+    }
+    if (action_id == "Redo") {
+        const WORD modifiers[] = {VK_CONTROL};
+        send_key_combo(modifiers, 1, 'Y');
+        return true;
+    }
     if (action_id == "SwitchTab") {
         const WORD modifiers[] = {VK_CONTROL};
         send_key_combo(modifiers, 1, VK_TAB);
@@ -209,6 +215,22 @@ bool execute_discrete_action(const std::string& action_id) {
     if (action_id == "GoForward" || action_id == "Navigate Forward") {
         const WORD modifiers[] = {VK_MENU};
         send_key_combo(modifiers, 1, VK_RIGHT);
+        return true;
+    }
+    if (action_id == "PrevSlide") {
+        send_key_press(VK_LEFT);
+        return true;
+    }
+    if (action_id == "NextSlide") {
+        send_key_press(VK_RIGHT);
+        return true;
+    }
+    if (action_id == "ToggleFullscreenVideo") {
+        send_key_press('F');
+        return true;
+    }
+    if (action_id == "ToggleStartMenu") {
+        send_key_press(VK_LWIN);
         return true;
     }
     if (action_id == "Minimize Window") {
@@ -241,6 +263,22 @@ bool execute_discrete_action(const std::string& action_id) {
     if (action_id == "ZoomOut") {
         const WORD modifiers[] = {VK_CONTROL};
         send_key_combo(modifiers, 1, VK_SUBTRACT);
+        return true;
+    }
+    if (action_id == "BrushSizeIncrease") {
+        send_key_press(VK_OEM_6);
+        return true;
+    }
+    if (action_id == "BrushSizeDecrease") {
+        send_key_press(VK_OEM_4);
+        return true;
+    }
+    if (action_id == "WeaponNext") {
+        send_wheel(-WHEEL_DELTA);
+        return true;
+    }
+    if (action_id == "WeaponPrev") {
+        send_wheel(WHEEL_DELTA);
         return true;
     }
     return false;
@@ -279,6 +317,11 @@ void apply_continuous_update(const core::ContinuousDomain domain, const float de
     case core::ContinuousDomain::Brightness:
         adjust_brightness_step(delta >= 0.0F ? step_count : -step_count);
         break;
+    case core::ContinuousDomain::Timeline:
+        for (int index = 0; index < step_count; ++index) {
+            send_key_press(delta >= 0.0F ? VK_RIGHT : VK_LEFT);
+        }
+        break;
     case core::ContinuousDomain::Cursor:
     case core::ContinuousDomain::Adjust:
     default:
@@ -304,6 +347,16 @@ const char* describe_action(const std::string& action_id) {
     if (action_id == "OpenBrowser") return "Opening Browser";
     if (action_id == "Escape") return "Cancelling...";
     if (action_id == "ConfirmEnter") return "Confirming...";
+    if (action_id == "Undo") return "Undoing...";
+    if (action_id == "Redo") return "Redoing...";
+    if (action_id == "PrevSlide") return "Previous Slide";
+    if (action_id == "NextSlide") return "Next Slide";
+    if (action_id == "ToggleFullscreenVideo") return "Toggling Fullscreen";
+    if (action_id == "ToggleStartMenu") return "Opening Start Menu";
+    if (action_id == "BrushSizeIncrease") return "Increasing Brush Size";
+    if (action_id == "BrushSizeDecrease") return "Decreasing Brush Size";
+    if (action_id == "WeaponNext") return "Cycling Next";
+    if (action_id == "WeaponPrev") return "Cycling Previous";
     return "Executing Action...";
 }
 

@@ -82,7 +82,8 @@ HeuristicsTracker::Mode HeuristicsTracker::mode_from_string(
     const std::string label_text = normalize_string(label);
 
     if (icontains(mode_text, "cursor") || icontains(mode_text, "point") ||
-        icontains(mode_text, "mouse") || icontains(mode_text, "grab and drag")) {
+        icontains(mode_text, "mouse") || icontains(mode_text, "grab and drag") ||
+        icontains(mode_text, "context drag")) {
         return Mode::CURSOR_MODE;
     }
     if (icontains(mode_text, "scroll") || icontains(mode_text, "magnitude")) {

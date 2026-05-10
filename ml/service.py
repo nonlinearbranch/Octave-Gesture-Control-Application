@@ -8,6 +8,7 @@ import threading
 import time
 import traceback
 import csv
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -486,6 +487,20 @@ class MlService:
         self._tracking_fail_count = 0
         self._hand_present_prev = False
         self._clutch_active_prev = False
+        self._clutch_last_activity_at = 0.0
+        self._clutch_idle_timeout_sec = 0.55
+        self._continuous_seen_at = 0.0
+        self._active_continuous_label: str | None = None
+        self._continuous_smoothed_value = 0.0
+        self._continuous_prev_index_y: float | None = None
+        self._dynamic_capture_active = False
+        self._dynamic_frames: list[list[float]] = []
+        self._dynamic_last_motion_at = 0.0
+        self._dynamic_motion_history: deque[float] = deque(maxlen=6)
+        self._dynamic_prev_wrist: tuple[float, float] | None = None
+        self._dynamic_motion_threshold = 0.018
+        self._dynamic_idle_timeout_sec = 0.22
+        self._dynamic_min_frames = 10
 
         # --- PHASE 1 COMPONENTS ---
         self._camera_manager = CameraManager(camera_index=self._camera_index, width=640, height=480)
@@ -494,7 +509,7 @@ class MlService:
         )
         self._gate_pipeline = InferenceGatePipeline(
             min_confidence=0.7,
-            required_hold_frames=6,
+            required_hold_frames=1,
         )
         self._preview_renderer = PreviewOverlayRenderer()
         self._static_runner: StaticInferenceRunner | None = None
@@ -605,13 +620,76 @@ class MlService:
             }
         return payload
 
-    def _set_mode(self, mode: str) -> None:
-        if self._recording_label_idx is not None:
-            self._stop_recording(reason="recording_stopped_mode_change")
+    def _reset_clutch_session(self) -> None:
+        """
+        Reset all state that belongs to one live clutch episode.
+
+        This is intentionally broader than just resetting the gate counter. The
+        clutch now scopes one gesture session, so when that session ends we also
+        clear any continuous-stream smoothing and any partial dynamic recording.
+        """
 
         self._gesture_stabilizer.reset()
         self._gate_pipeline.reset()
         self._sequence_buffer.clear()
+        self._clutch_active_prev = False
+        self._clutch_last_activity_at = 0.0
+        self._continuous_seen_at = 0.0
+        self._active_continuous_label = None
+        self._continuous_smoothed_value = 0.0
+        self._continuous_prev_index_y = None
+        self._dynamic_capture_active = False
+        self._dynamic_frames = []
+        self._dynamic_last_motion_at = 0.0
+        self._dynamic_motion_history.clear()
+        self._dynamic_prev_wrist = None
+
+    def _measure_motion(self, normalized_hand: "NormalizedHandFrame" | None) -> float:
+        if normalized_hand is None or not normalized_hand.landmarks_xyz:
+            self._dynamic_prev_wrist = None
+            self._dynamic_motion_history.clear()
+            return 0.0
+
+        wrist_x, wrist_y = normalized_hand.landmarks_xyz[0][0], normalized_hand.landmarks_xyz[0][1]
+        if self._dynamic_prev_wrist is None:
+            self._dynamic_prev_wrist = (wrist_x, wrist_y)
+            self._dynamic_motion_history.append(0.0)
+            return 0.0
+
+        prev_x, prev_y = self._dynamic_prev_wrist
+        self._dynamic_prev_wrist = (wrist_x, wrist_y)
+        motion = ((wrist_x - prev_x) ** 2 + (wrist_y - prev_y) ** 2) ** 0.5
+        self._dynamic_motion_history.append(float(motion))
+        return max(self._dynamic_motion_history, default=0.0)
+
+    def _build_continuous_payload(
+        self,
+        label: str,
+        action: str,
+        normalized_hand: "NormalizedHandFrame" | None,
+    ) -> Dict[str, Any] | None:
+        if normalized_hand is None or len(normalized_hand.landmarks_xyz) < 21:
+            return None
+
+        index_tip = normalized_hand.landmarks_xyz[8]
+        value = 0.0
+
+        if self._continuous_prev_index_y is not None:
+            raw_delta = float(self._continuous_prev_index_y - index_tip[1])
+            self._continuous_smoothed_value = (self._continuous_smoothed_value * 0.72) + (raw_delta * 0.28)
+            value = self._continuous_smoothed_value
+        self._continuous_prev_index_y = float(index_tip[1])
+
+        payload = self._build_gesture_payload(label, 1.0, normalized_hand)
+        payload["action"] = action
+        payload["value"] = float(value)
+        return payload
+
+    def _set_mode(self, mode: str) -> None:
+        if self._recording_label_idx is not None:
+            self._stop_recording(reason="recording_stopped_mode_change")
+
+        self._reset_clutch_session()
         self._interaction_mode = mode
         self._send({"type": "mode", "mode": mode})
 
@@ -684,9 +762,7 @@ class MlService:
             )
 
         if camera_changed or confidence_changed:
-            self._gesture_stabilizer.reset()
-            self._gate_pipeline.reset()
-            self._sequence_buffer.clear()
+            self._reset_clutch_session()
 
         self._send(
             {
@@ -1117,12 +1193,6 @@ class MlService:
                     print("DEBUG: No hands detected", flush=True)
             normalized_hand = self._hand_ingestion.normalize_hand(detection)
 
-            # Phase 2 dashcam buffer: every valid normalized hand frame feeds
-            # the rolling dynamic sequence window. We do this before gating so
-            # movement history is available even while the clutch is building.
-            if normalized_hand is not None:
-                self._sequence_buffer.append_features(normalized_hand.normalized_features)
-
             if not detection.hand_present:
                 self._tracking_fail_count += 1
                 if is_recording:
@@ -1142,7 +1212,7 @@ class MlService:
                 gate1_passed=False,
                 clutch_active=False,
                 clutch_progress=0,
-                required_clutch_frames=6,
+                required_clutch_frames=1,
                 hint_text="",
                 status_text="",
                 inference_label=None,
@@ -1163,11 +1233,13 @@ class MlService:
             preview_state.required_clutch_frames = gate_decision.required_clutch_frames
             if gate_decision.clutch_active and not self._clutch_active_prev:
                 self._play_clutch_activation_sound()
+            if gate_decision.clutch_active:
+                self._clutch_last_activity_at = time.monotonic()
             self._clutch_active_prev = gate_decision.clutch_active
+            motion_score = self._measure_motion(normalized_hand)
 
             # --- PIPELINE STAGE 5: STATIC INFERENCE ---
             inference_result: StaticInferenceResult | None = None
-            dynamic_result: DynamicInferenceResult | None = None
             if (
                 gate_decision.accepted
                 and normalized_hand is not None
@@ -1175,7 +1247,6 @@ class MlService:
                 and self._static_runner is not None
             ):
                 with self._model_lock:
-                    dynamic_result = self._dynamic_runner.infer(self._sequence_buffer)
                     inference_result = self._static_runner.infer(normalized_hand)
 
             preview_state = self._build_preview_state(
@@ -1198,20 +1269,12 @@ class MlService:
                 preview_state,
                 hand_frame=normalized_hand,
             )
-            if dynamic_result is not None and not dynamic_result.is_unknown:
-                overlay_frame = self._preview_renderer.render_dynamic(
-                    overlay_frame,
-                    dynamic_result,
-                )
             self._encode_preview_frame(overlay_frame)
 
             # --- PIPELINE STAGE 7: STABILIZER + COOLDOWN + IPC ---
             if not detection.hand_present:
                 if self._hand_present_prev:
-                    self._gesture_stabilizer.reset()
-                    self._gate_pipeline.reset()
-                    self._sequence_buffer.clear()
-                    self._clutch_active_prev = False
+                    self._reset_clutch_session()
                 self._hand_present_prev = False
                 time.sleep(0.02)
                 continue
@@ -1220,35 +1283,6 @@ class MlService:
 
             if is_recording:
                 time.sleep(0.01)
-                continue
-
-            if dynamic_result is not None and not dynamic_result.is_unknown:
-                now = time.monotonic()
-                if now - self._last_action_time >= self._action_cooldown_sec:
-                    self._last_action_time = now
-                    predicted_label = dynamic_result.label_name
-                    print(f"DEBUG: predicted_label={predicted_label}", flush=True)
-                    payload = {
-                        "type": "gesture",
-                        "label": predicted_label,
-                        "class": predicted_label,
-                        "action": self._router.get_action(predicted_label, "dynamic"),
-                        "mode": self._interaction_mode,
-                        "confidence": dynamic_result.confidence,
-                    }
-                    if normalized_hand is not None and len(normalized_hand.landmarks_xyz) >= 21:
-                        payload["index_tip"] = {
-                            "x": float(normalized_hand.landmarks_xyz[8][0]),
-                            "y": float(normalized_hand.landmarks_xyz[8][1]),
-                        }
-                        payload["thumb_tip"] = {
-                            "x": float(normalized_hand.landmarks_xyz[4][0]),
-                            "y": float(normalized_hand.landmarks_xyz[4][1]),
-                        }
-                    self._send(payload)
-                    self._last_action_label = predicted_label
-                    self._sequence_buffer.clear()
-                time.sleep(0.02)
                 continue
 
             # --- Dual-Brain collision resolution ---
@@ -1284,6 +1318,95 @@ class MlService:
                     )
                 )
 
+            now = time.monotonic()
+
+            # Dynamic gestures are now treated as bounded episodes: once the
+            # clutch is open and motion clearly starts, we record a sequence,
+            # wait for movement to settle, classify once, then reset the
+            # session. This prevents static and dynamic inference from fighting
+            # over the same rolling frame window.
+            if (
+                gate_decision.accepted
+                and normalized_hand is not None
+                and resolved_label == "UNKNOWN"
+                and motion_score >= self._dynamic_motion_threshold
+            ):
+                if not self._dynamic_capture_active:
+                    self._dynamic_capture_active = True
+                    self._dynamic_frames = []
+                self._dynamic_last_motion_at = now
+
+            if self._dynamic_capture_active and normalized_hand is not None:
+                self._dynamic_frames.append(list(normalized_hand.normalized_features))
+                if motion_score >= self._dynamic_motion_threshold:
+                    self._dynamic_last_motion_at = now
+
+                capture_complete = (
+                    len(self._dynamic_frames) >= 30 or
+                    (
+                        len(self._dynamic_frames) >= self._dynamic_min_frames and
+                        now - self._dynamic_last_motion_at >= self._dynamic_idle_timeout_sec
+                    )
+                )
+                if capture_complete:
+                    with self._model_lock:
+                        dynamic_result = self._dynamic_runner.infer_sequence(self._dynamic_frames)
+                    if not dynamic_result.is_unknown:
+                        overlay_frame = self._preview_renderer.render_dynamic(overlay_frame, dynamic_result)
+                        self._encode_preview_frame(overlay_frame)
+                        self._last_action_time = now
+                        predicted_label = dynamic_result.label_name
+                        print(f"DEBUG: predicted_label={predicted_label}", flush=True)
+                        payload = self._build_gesture_payload(
+                            predicted_label,
+                            dynamic_result.confidence,
+                            normalized_hand,
+                        )
+                        payload["action"] = self._router.get_action(predicted_label, "dynamic")
+                        payload["value"] = 0.0
+                        self._send(payload)
+                        self._last_action_label = predicted_label
+                    self._reset_clutch_session()
+                    time.sleep(0.02)
+                    continue
+
+            if resolved_label != "UNKNOWN":
+                resolved_action = self._router.get_action(resolved_label, "static")
+                if resolved_action.startswith("Mode:"):
+                    continuous_payload = self._build_continuous_payload(
+                        resolved_label,
+                        resolved_action,
+                        normalized_hand,
+                    )
+                    if continuous_payload is not None:
+                        print(f"DEBUG: predicted_label={resolved_label}", flush=True)
+                        self._send(continuous_payload)
+                        self._last_action_label = resolved_label
+                        self._active_continuous_label = resolved_label
+                        self._continuous_seen_at = now
+                        self._clutch_last_activity_at = now
+                    time.sleep(0.02)
+                    continue
+
+            if (
+                self._active_continuous_label is not None and
+                now - self._continuous_seen_at >= self._clutch_idle_timeout_sec
+            ):
+                self._reset_clutch_session()
+                time.sleep(0.02)
+                continue
+
+            if (
+                gate_decision.clutch_active and
+                not self._dynamic_capture_active and
+                self._active_continuous_label is None and
+                self._clutch_last_activity_at > 0.0 and
+                now - self._clutch_last_activity_at >= self._clutch_idle_timeout_sec
+            ):
+                self._reset_clutch_session()
+                time.sleep(0.02)
+                continue
+
             if stable_result.label != "UNKNOWN":
                 now = time.monotonic()
                 if now - self._last_action_time >= self._action_cooldown_sec:
@@ -1297,6 +1420,7 @@ class MlService:
                         "action": self._router.get_action(predicted_label, "static"),
                         "mode": self._interaction_mode,
                         "confidence": stable_result.confidence,
+                        "value": 0.0,
                     }
                     if normalized_hand is not None and len(normalized_hand.landmarks_xyz) >= 21:
                         payload["index_tip"] = {
@@ -1309,6 +1433,7 @@ class MlService:
                         }
                     self._send(payload)
                     self._last_action_label = predicted_label
+                    self._reset_clutch_session()
 
             time.sleep(0.02)
 
@@ -1649,9 +1774,7 @@ class MlService:
                 if self._recording_label_idx is not None:
                     self._stop_recording(reason="recording_stopped_disconnect")
                 self._close_voice_stream()
-                self._gesture_stabilizer.reset()
-                self._gate_pipeline.reset()
-                self._sequence_buffer.clear()
+                self._reset_clutch_session()
                 self._client = None
 
         self._hand_ingestion.close()

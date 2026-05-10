@@ -26,6 +26,10 @@ struct IntentEvent {
     std::string source_label{};
     std::string semantic_label{};
     float value{0.0F};
+    float index_x{0.0F};
+    float index_y{0.0F};
+    float thumb_x{0.0F};
+    float thumb_y{0.0F};
 };
 
 inline const char* to_string(const IntentKind intent) {
