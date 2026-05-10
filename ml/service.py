@@ -475,7 +475,7 @@ class MlService:
         self._mic_state = "idle"
 
         self._labels: dict[int, str] = {}
-        self._gesture_stabilizer = GestureStabilizer(min_confidence=0.6)
+        self._gesture_stabilizer = GestureStabilizer(min_confidence=0.72)
         self._last_action_time = 0.0
         self._action_cooldown_sec = 1.5
         self._last_action_label: str | None = None
@@ -490,7 +490,10 @@ class MlService:
         self._clutch_active_prev = False
         self._clutch_last_activity_at = 0.0
         self._clutch_idle_timeout_sec = 0.55
-        self._clutch_session_duration_sec = 12.0
+        # Give the user enough time to arm the system and then naturally move
+        # into the intended gesture without feeling rushed. Around 25 seconds
+        # keeps the clutch deliberate without forcing constant re-arming.
+        self._clutch_session_duration_sec = 25.0
         self._clutch_session_expires_at = 0.0
         self._clutch_session_armed = False
         self._continuous_seen_at = 0.0
@@ -512,7 +515,7 @@ class MlService:
             min_detection_confidence=self._hand_min_detection_confidence
         )
         self._gate_pipeline = InferenceGatePipeline(
-            min_confidence=0.7,
+            min_confidence=0.75,
             required_hold_frames=1,
         )
         self._preview_renderer = PreviewOverlayRenderer()
@@ -559,11 +562,11 @@ class MlService:
         dynamic_labels, dynamic_model_path = _load_runtime_dynamic_labels()
 
         if self._static_runner is None:
-            self._static_runner = StaticInferenceRunner(
+                self._static_runner = StaticInferenceRunner(
                 model_path=model_path,
                 label_map=self._labels,
                 input_size=126,
-                confidence_threshold=0.6,
+                confidence_threshold=0.72,
             )
         else:
             self._static_runner.reload(model_path=model_path, label_map=self._labels)
@@ -1116,7 +1119,7 @@ class MlService:
             hint_text = "Check camera access and service status"
         elif clutch_active and not hand_present:
             status_text = "Clutch armed"
-            hint_text = f"Raise a hand and make your gesture. {max(0, int(clutch_seconds_remaining))}s remaining"
+            hint_text = f"Clutch stays open. Raise one hand and make your gesture. {max(0, int(clutch_seconds_remaining))}s remaining"
         elif not hand_present:
             status_text = "Detecting hand"
             hint_text = "Move your hand into frame"
@@ -1143,7 +1146,7 @@ class MlService:
             inference_label = inference_result.label_name
         else:
             status_text = "Clutch armed"
-            hint_text = f"Make your gesture now. {max(0, int(clutch_seconds_remaining))}s remaining"
+            hint_text = f"Make your gesture now with one hand. {max(0, int(clutch_seconds_remaining))}s remaining"
 
         return PreviewState(
             camera_ready=camera_ready,
