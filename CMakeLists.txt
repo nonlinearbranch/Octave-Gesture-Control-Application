@@ -24,4 +24,4 @@ add_executable(spider_slice1
 )
 
 target_include_directories(spider_slice1 PRIVATE src)
-target_link_libraries(spider_slice1 PRIVATE ws2_32 user32 shell32 dxva2)
+target_link_libraries(spider_slice1 PRIVATE ws2_32 user32 shell32 dxva2 ole32)

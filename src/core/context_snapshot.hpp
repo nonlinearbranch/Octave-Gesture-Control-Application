@@ -48,6 +48,7 @@ struct ContextSnapshot {
     std::string app_id{};
     std::string window_title{};
     ContextMode context_mode{ContextMode::Unknown};
+    bool is_audio_playing{false};
 };
 
 }  // namespace spider::core
