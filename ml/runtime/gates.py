@@ -82,7 +82,15 @@ class Gate2OpenPalmClutchGate:
           active until a hard reset condition occurs elsewhere
         """
 
-        # First, apply the hard reset conditions.
+        # If the clutch is already active, keep it active permanently until
+        # an explicit reset occurs elsewhere. This makes the open-palm gesture a trigger
+        # rather than a hold gate.
+        if self._state.active:
+            if hand_frame is not None:
+                self._state.last_seen_frame_id = hand_frame.frame_id
+            return self._state
+
+        # First, apply the hard reset conditions for activation.
         if hand_frame is None:
             self.reset()
             return self._state
@@ -92,13 +100,6 @@ class Gate2OpenPalmClutchGate:
             return self._state
 
         current_hint = hand_frame.raw_gesture_hint
-
-        # If the clutch is already active, keep it active permanently until
-        # an explicit reset occurs. This makes the open-palm gesture a trigger
-        # rather than a hold gate.
-        if self._state.active:
-            self._state.last_seen_frame_id = hand_frame.frame_id
-            return self._state
 
         # If the current frame is not OPEN_PALM_PAIR, stay inactive.
         if current_hint != "OPEN_PALM_PAIR":

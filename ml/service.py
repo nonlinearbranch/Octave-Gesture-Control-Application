@@ -489,7 +489,7 @@ class MlService:
         self._hand_present_prev = False
         self._clutch_active_prev = False
         self._clutch_last_activity_at = 0.0
-        self._clutch_idle_timeout_sec = 0.55
+        self._clutch_idle_timeout_sec = 2.5
         # Give the user enough time to arm the system and then naturally move
         # into the intended gesture without feeling rushed. Around 25 seconds
         # keeps the clutch deliberate without forcing constant re-arming.
@@ -1308,7 +1308,9 @@ class MlService:
             # --- PIPELINE STAGE 7: STABILIZER + COOLDOWN + IPC ---
             if not detection.hand_present:
                 if self._active_continuous_label is not None and now - self._continuous_seen_at >= self._clutch_idle_timeout_sec:
-                    self._reset_clutch_session()
+                    self._active_continuous_label = None
+                    self._continuous_smoothed_value = 0.0
+                    self._continuous_prev_index_y = None
                 elif not clutch_session_active and self._hand_present_prev:
                     self._reset_clutch_session()
                 self._hand_present_prev = False
@@ -1403,7 +1405,8 @@ class MlService:
                         payload["value"] = 0.0
                         self._send(payload)
                         self._last_action_label = predicted_label
-                    self._reset_clutch_session()
+                    self._dynamic_capture_active = False
+                    self._dynamic_frames = []
                     time.sleep(0.02)
                     continue
 
@@ -1429,7 +1432,9 @@ class MlService:
                 self._active_continuous_label is not None and
                 now - self._continuous_seen_at >= self._clutch_idle_timeout_sec
             ):
-                self._reset_clutch_session()
+                self._active_continuous_label = None
+                self._continuous_smoothed_value = 0.0
+                self._continuous_prev_index_y = None
                 time.sleep(0.02)
                 continue
 
@@ -1458,7 +1463,7 @@ class MlService:
                         }
                     self._send(payload)
                     self._last_action_label = predicted_label
-                    self._reset_clutch_session()
+                    self._gesture_stabilizer.reset()
 
             time.sleep(0.02)
 
