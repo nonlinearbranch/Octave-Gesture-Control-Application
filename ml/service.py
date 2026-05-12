@@ -701,6 +701,36 @@ class MlService:
         payload["value"] = float(value)
         return payload
 
+    def _should_start_dynamic_episode(
+        self,
+        *,
+        clutch_session_active: bool,
+        gate1_passed: bool,
+        normalized_hand: "NormalizedHandFrame" | None,
+        is_recording: bool,
+        motion_score: float,
+        resolved_action: str,
+    ) -> bool:
+        """
+        Decide whether post-clutch motion should claim the interaction for the
+        dynamic pipeline.
+
+        Dynamic gestures should not depend on static classification collapsing
+        to UNKNOWN. Once the clutch is open and motion clearly starts, we lock
+        into a bounded dynamic episode unless the current pose is an explicit
+        continuous-control mode.
+        """
+
+        if not clutch_session_active or not gate1_passed:
+            return False
+        if normalized_hand is None or is_recording:
+            return False
+        if motion_score < self._dynamic_motion_threshold:
+            return False
+        if resolved_action.startswith("Mode:"):
+            return False
+        return True
+
     def _set_mode(self, mode: str) -> None:
         if self._recording_label_idx is not None:
             self._stop_recording(reason="recording_stopped_mode_change")
@@ -1343,6 +1373,11 @@ class MlService:
                 custom_label, custom_conf,
                 gesture_type="static",
             )
+            resolved_action = (
+                self._router.get_action(resolved_label, "static")
+                if resolved_label != "UNKNOWN"
+                else "Unknown"
+            )
 
             if resolved_label == "UNKNOWN":
                 stable_result = self._gesture_stabilizer(
@@ -1358,17 +1393,17 @@ class MlService:
 
             now = time.monotonic()
 
-            # Dynamic gestures are now treated as bounded episodes: once the
-            # clutch is open and motion clearly starts, we record a sequence,
-            # wait for movement to settle, classify once, then reset the
-            # session. This prevents static and dynamic inference from fighting
-            # over the same rolling frame window.
-            if (
-                clutch_session_active
-                and gate_decision.gate1_passed
-                and normalized_hand is not None
-                and resolved_label == "UNKNOWN"
-                and motion_score >= self._dynamic_motion_threshold
+            # Dynamic gestures are treated as bounded episodes: once the clutch
+            # is open and motion clearly starts, the dynamic pipeline claims the
+            # interaction immediately and static actions are suppressed until
+            # that episode ends.
+            if self._should_start_dynamic_episode(
+                clutch_session_active=clutch_session_active,
+                gate1_passed=gate_decision.gate1_passed,
+                normalized_hand=normalized_hand,
+                is_recording=is_recording,
+                motion_score=motion_score,
+                resolved_action=resolved_action,
             ):
                 if not self._dynamic_capture_active:
                     self._dynamic_capture_active = True
@@ -1405,13 +1440,13 @@ class MlService:
                         payload["value"] = 0.0
                         self._send(payload)
                         self._last_action_label = predicted_label
+                    self._gesture_stabilizer.reset()
                     self._dynamic_capture_active = False
                     self._dynamic_frames = []
                     time.sleep(0.02)
                     continue
 
             if resolved_label != "UNKNOWN":
-                resolved_action = self._router.get_action(resolved_label, "static")
                 if resolved_action.startswith("Mode:"):
                     continuous_payload = self._build_continuous_payload(
                         resolved_label,
