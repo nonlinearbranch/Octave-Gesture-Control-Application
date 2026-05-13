@@ -1,4 +1,0 @@
-GESTURE "PINCH" "Adjust" "Adjust"
-GESTURE "SWIPE_UP" "Scroll" "ScrollUp"
-GESTURE "MOVE_HAND" "Adjust" "Adjust"
-GESTURE "OPEN_PALM" "Select" "Click"

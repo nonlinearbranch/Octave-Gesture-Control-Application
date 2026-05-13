@@ -40,3 +40,7 @@ ml/data/vosk-model-small-en-us-0.15/
 
 test_feature_extraction.py
 testing.py
+debug_buffer.py
+debug_camera.py
+debug_pipeline.py
+debug_stream.py

@@ -399,11 +399,20 @@ class CameraManager:
         The frame is mirrored horizontally because the current UI and recording
         workflow expect selfie-style feedback. Doing that once here keeps later
         modules from each making their own inconsistent decision.
+
+        We make a defensive copy of the frame before any processing because
+        some OpenCV backends reuse internal buffers across consecutive reads.
+        Without the copy, the stored frame_bgr reference could silently point
+        at stale or partially-overwritten memory by the next capture cycle.
         """
 
         if cv2 is not None:
             try:
-                frame_bgr = self._sanitize_stereo_like_frame(frame_bgr)
+                # Defensive copy: some camera backends reuse the internal
+                # frame buffer on the next read(), which silently corrupts
+                # any reference we hold.  Copying once up front is cheap
+                # and guarantees downstream code sees a stable snapshot.
+                frame_bgr = frame_bgr.copy()
                 frame_bgr = cv2.flip(frame_bgr, 1)
             except Exception:
                 # Mirroring improves UX, but capture should still succeed even if
@@ -423,42 +432,6 @@ class CameraManager:
             self._latest_frame = frame
 
         return frame
-
-    def _sanitize_stereo_like_frame(self, frame_bgr: Any) -> Any:
-        """
-        Collapse duplicated left/right frames into one normal preview when needed.
-
-        Some camera drivers or virtual devices expose a frame where the right
-        half is effectively a mirrored copy of the left half. When that
-        happens, the preview shows readable text on one side and reversed text
-        on the other. If the two halves are almost mirror-identical, we keep a
-        single half before the rest of the runtime sees the frame.
-        """
-
-        if cv2 is None or frame_bgr is None or not hasattr(frame_bgr, "shape"):
-            return frame_bgr
-
-        height, width = frame_bgr.shape[:2]
-        if width < 2 or width < int(height * 1.6):
-            return frame_bgr
-
-        half_width = width // 2
-        left = frame_bgr[:, :half_width]
-        right = frame_bgr[:, width - half_width :]
-
-        try:
-            left_small = cv2.resize(left, (160, 120), interpolation=cv2.INTER_AREA)
-            right_small = cv2.resize(right, (160, 120), interpolation=cv2.INTER_AREA)
-            right_small = cv2.flip(right_small, 1)
-            diff = cv2.absdiff(left_small, right_small)
-            diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-            mean_diff = float(cv2.mean(diff_gray)[0])
-            if mean_diff < 18.0:
-                return left
-        except Exception:
-            return frame_bgr
-
-        return frame_bgr
 
     def _release_capture_locked(self) -> None:
         """Release the current OpenCV capture handle, ignoring secondary errors."""
