@@ -129,25 +129,31 @@ core::ContinuousDomain DecisionEngine::domain_for_context() const {
     case core::ContextMode::Conferencing:
         return core::ContinuousDomain::Volume;
     default:
-        return core::ContinuousDomain::Adjust;
+        // ContinuousDomain::Adjust has no implementation in
+        // apply_continuous_update (falls through to default: break).
+        // Volume is the most universally useful fallback when the
+        // foreground process cannot be classified.
+        return core::ContinuousDomain::Volume;
     }
 }
 
 std::string DecisionEngine::resolve_discrete_action(const core::IntentEvent& intent) const {
     if (intent.semantic_label == "Context: Swipe Left") {
         switch (latest_context_.context_mode) {
-        case core::ContextMode::Browser: return "GoBack";
+        case core::ContextMode::Browser: return "SwitchTabPrev";
         case core::ContextMode::Media: return "PrevTrack";
-        case core::ContextMode::Editor: return "Undo";
+        case core::ContextMode::Editor:
+        case core::ContextMode::Design: return "Undo";
         case core::ContextMode::Presentation: return "PrevSlide";
         default: return "GoBack";
         }
     }
     if (intent.semantic_label == "Context: Swipe Right") {
         switch (latest_context_.context_mode) {
-        case core::ContextMode::Browser: return "GoForward";
+        case core::ContextMode::Browser: return "SwitchTab";
         case core::ContextMode::Media: return "NextTrack";
-        case core::ContextMode::Editor: return "Redo";
+        case core::ContextMode::Editor:
+        case core::ContextMode::Design: return "Redo";
         case core::ContextMode::Presentation: return "NextSlide";
         default: return "GoForward";
         }

@@ -691,9 +691,26 @@ class MlService:
         value = 0.0
 
         if self._continuous_prev_index_y is not None:
+            # raw_delta is the per-frame Y movement of the index fingertip in
+            # normalised coordinates (0.0–1.0).  Positive means the hand moved
+            # UP in screen space (y decreases for upward movement in MediaPipe).
             raw_delta = float(self._continuous_prev_index_y - index_tip[1])
-            self._continuous_smoothed_value = (self._continuous_smoothed_value * 0.72) + (raw_delta * 0.28)
-            value = self._continuous_smoothed_value
+
+            # Lighter smoothing (0.4 / 0.6) keeps the slider responsive to
+            # real-time hand movement instead of lagging behind.  The old
+            # 0.72/0.28 split was so sluggish that moderate movements were
+            # dampened below the C++ dead-zone threshold of 0.05.
+            self._continuous_smoothed_value = (
+                self._continuous_smoothed_value * 0.4
+            ) + (raw_delta * 0.6)
+
+            # Scale up to a range the C++ action executor can act on.  The
+            # per-frame raw_delta from MediaPipe landmarks is typically
+            # 0.005–0.03 for normal hand movement.  After smoothing, values
+            # sit around 0.01–0.04 — well below the C++ dead-zone (0.05).
+            # A 6× gain brings comfortable movements into the 0.06–0.24
+            # range, producing 1-4 volume/scroll steps per frame.
+            value = self._continuous_smoothed_value * 6.0
         self._continuous_prev_index_y = float(index_tip[1])
 
         payload = self._build_gesture_payload(label, 1.0, normalized_hand)

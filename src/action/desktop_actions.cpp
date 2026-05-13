@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -91,6 +94,39 @@ int compute_step_count(const float delta) {
     return rounded < 1 ? 1 : rounded;
 }
 
+void adjust_brightness_step_powershell(const int steps) {
+    static std::atomic<int> current_laptop_brightness{-1};
+    static auto last_update = std::chrono::steady_clock::now();
+    
+    // Default assumption if we don't know the starting brightness
+    if (current_laptop_brightness == -1) {
+        current_laptop_brightness = 50; 
+    }
+
+    int target = current_laptop_brightness + (steps * 5);
+    target = std::clamp(target, 0, 100);
+    
+    // Only update if there's an actual change
+    if (target == current_laptop_brightness) {
+        return;
+    }
+    
+    current_laptop_brightness = target;
+
+    // Throttle PowerShell executions to avoid freezing the system
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update).count() < 150) {
+        return; 
+    }
+    last_update = now;
+
+    // Execute asynchronously to not block the gesture processing loop
+    std::thread([target]() {
+        std::string cmd = "powershell.exe -WindowStyle Hidden -Command \"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, " + std::to_string(target) + ")\"";
+        WinExec(cmd.c_str(), SW_HIDE);
+    }).detach();
+}
+
 void adjust_brightness_step(const int steps) {
     const HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
     if (!monitor) {
@@ -99,26 +135,37 @@ void adjust_brightness_step(const int steps) {
 
     DWORD count = 0;
     if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &count) || count == 0) {
+        adjust_brightness_step_powershell(steps);
         return;
     }
 
     PHYSICAL_MONITOR physical{};
     if (!GetPhysicalMonitorsFromHMONITOR(monitor, 1, &physical)) {
+        adjust_brightness_step_powershell(steps);
         return;
     }
 
     DWORD min_brightness = 0;
     DWORD cur_brightness = 0;
     DWORD max_brightness = 0;
+    bool ddc_success = false;
+    
     if (GetMonitorBrightness(physical.hPhysicalMonitor, &min_brightness, &cur_brightness, &max_brightness)) {
         const int range = static_cast<int>(max_brightness - min_brightness);
         const int increment = std::max(1, range / 20);
         int target = static_cast<int>(cur_brightness) + steps * increment;
         target = std::clamp(target, static_cast<int>(min_brightness), static_cast<int>(max_brightness));
-        SetMonitorBrightness(physical.hPhysicalMonitor, static_cast<DWORD>(target));
+        if (SetMonitorBrightness(physical.hPhysicalMonitor, static_cast<DWORD>(target))) {
+            ddc_success = true;
+        }
     }
 
     DestroyPhysicalMonitors(1, &physical);
+    
+    // If DDC/CI failed (e.g. laptop display), fall back to PowerShell WMI method
+    if (!ddc_success) {
+        adjust_brightness_step_powershell(steps);
+    }
 }
 
 }  // namespace
@@ -200,6 +247,11 @@ bool execute_discrete_action(const std::string& action_id) {
     if (action_id == "SwitchTab") {
         const WORD modifiers[] = {VK_CONTROL};
         send_key_combo(modifiers, 1, VK_TAB);
+        return true;
+    }
+    if (action_id == "SwitchTabPrev") {
+        const WORD modifiers[] = {VK_CONTROL, VK_SHIFT};
+        send_key_combo(modifiers, 2, VK_TAB);
         return true;
     }
     if (action_id == "SwitchWindow") {
@@ -357,6 +409,7 @@ const char* describe_action(const std::string& action_id) {
     if (action_id == "BrushSizeDecrease") return "Decreasing Brush Size";
     if (action_id == "WeaponNext") return "Cycling Next";
     if (action_id == "WeaponPrev") return "Cycling Previous";
+    if (action_id == "SwitchTabPrev") return "Previous Tab";
     return "Executing Action...";
 }
 

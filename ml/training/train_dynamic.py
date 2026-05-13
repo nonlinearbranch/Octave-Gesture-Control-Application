@@ -176,8 +176,8 @@ def train_dynamic_model(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the dynamic gesture model.")
     parser.add_argument("--target", choices=["default", "custom"], required=True)
-    parser.add_argument("--epochs", type=int, default=60)
-    parser.add_argument("--lr", type=float, default=0.0007)
+    parser.add_argument("--epochs", type=int, default=75)
+    parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--batch-size", type=int, default=16)
     args = parser.parse_args()
 

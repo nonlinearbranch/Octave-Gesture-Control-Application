@@ -76,7 +76,8 @@ core::ContextMode classify_process(const std::string& process_name) {
         process_name.find("teams") != std::string::npos ||
         process_name.find("webex") != std::string::npos ||
         process_name.find("slack") != std::string::npos ||
-        process_name.find("discord") != std::string::npos) {
+        process_name.find("discord") != std::string::npos ||
+        process_name.find("meet") != std::string::npos) {
         return core::ContextMode::Conferencing;
     }
 
@@ -97,14 +98,19 @@ core::ContextMode classify_process(const std::string& process_name) {
         return core::ContextMode::Gaming;
     }
 
+    // SPIDER's own UI runs on Electron / Node.  Classify it as Media so
+    // the Palm Slider maps to Volume when the monitoring tab is focused.
+    if (process_name.find("spider") != std::string::npos ||
+        process_name.find("electron") != std::string::npos ||
+        process_name.find("node") != std::string::npos) {
+        return core::ContextMode::Media;
+    }
+
     if (process_name.find("chrome") != std::string::npos ||
         process_name.find("firefox") != std::string::npos ||
         process_name.find("msedge") != std::string::npos ||
         process_name.find("opera") != std::string::npos ||
-        process_name.find("brave") != std::string::npos ||
-        process_name.find("electron") != std::string::npos ||
-        process_name.find("spider-ui") != std::string::npos ||
-        process_name.find("node") != std::string::npos) {
+        process_name.find("brave") != std::string::npos) {
         return core::ContextMode::Browser;
     }
 
