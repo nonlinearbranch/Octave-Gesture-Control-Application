@@ -393,13 +393,6 @@ const DEFAULT_GESTURE_DETAILS = {
   }
 }
 
-const getDefaultEngineGestureNames = (config = { default_mapping: { static: {}, dynamic: {} } }) =>
-  new Set(
-    [...Object.values(config.default_mapping?.static || {}), ...Object.values(config.default_mapping?.dynamic || {})]
-      .map((gesture) => gesture.name)
-      .filter(Boolean)
-  )
-
 const toEngineAction = (action) => {
   if (action && typeof action === 'object') return action
   const normalized = typeof action === 'string' ? action.trim() : ''
@@ -444,6 +437,45 @@ const buildVoiceGestureTitle = (phrase) =>
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ') || 'Voice Command'
+
+const buildCustomHandGestureCard = (gesture = {}, mapping = {}) => {
+  const engineAction = mapping.static_actions?.[gesture.name] || gesture.action || 'Click'
+  const actionLabel = describeEngineAction(engineAction)
+  const controlModel = gesture.controlModel === 'dynamic' ? 'dynamic' : 'static'
+  return {
+    id: `hand-${controlModel}-${gesture.label}`,
+    label: gesture.label,
+    title: gesture.name,
+    subtitle: actionLabel,
+    engineGestureName: gesture.name,
+    engineAction,
+    defaultAction: actionLabel,
+    type: 'hand',
+    family: controlModel === 'dynamic' ? 'Custom Dynamic Gesture' : 'Custom Static Gesture',
+    controlModel,
+    enabled: true,
+    locked: false
+  }
+}
+
+const buildCustomVoiceGestureCard = (gesture = {}) => {
+  const engineAction = gesture.action || 'Click'
+  const actionLabel = describeEngineAction(engineAction)
+  const phrase = gesture.phrase || gesture.name || 'Your custom phrase'
+  return {
+    id: `voice-${phrase.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    title: buildVoiceGestureTitle(phrase),
+    subtitle: actionLabel,
+    engineAction,
+    defaultAction: actionLabel,
+    phrase,
+    type: 'voice',
+    family: 'Static Command Voice Family',
+    controlModel: 'static',
+    enabled: true,
+    locked: false
+  }
+}
 
 const DEFAULT_SETTINGS = {
   selectedCameraId: '',
@@ -731,19 +763,65 @@ function App() {
     return [...dynamicGestures, ...staticGestures]
   }
 
+  const loadGestureConfig = async () => {
+    if (!window.api?.getConfig) return null
+    const result = await window.api.getConfig()
+    if (!result || typeof result !== 'object') return null
+    return {
+      default_mapping: result.default_mapping || { static: {}, dynamic: {} },
+      user_mapping: result.user_mapping || {},
+      override_state: result.override_state || {}
+    }
+  }
+
+  const rebuildGestureLibrary = (config, result) => {
+    const mapping = result?.mapping || {}
+    const disabledStatic = new Set(mapping.disabled_static || [])
+    const baseGestures = getDefaultGesturesFromConfig(config).map((gesture) =>
+      gesture.engineGestureName
+        ? { ...gesture, enabled: !disabledStatic.has(gesture.engineGestureName) }
+        : gesture
+    )
+    const customStaticGestures = (result?.partitions?.custom?.static || []).map((gesture) =>
+      buildCustomHandGestureCard(gesture, mapping)
+    )
+    const customDynamicGestures = (result?.partitions?.custom?.dynamic || []).map((gesture) =>
+      buildCustomHandGestureCard(gesture, mapping)
+    )
+    const customVoiceGestures = (result?.partitions?.custom?.voice || []).map((gesture) =>
+      buildCustomVoiceGestureCard(gesture)
+    )
+    return [
+      ...customVoiceGestures,
+      ...customDynamicGestures,
+      ...customStaticGestures,
+      ...baseGestures
+    ]
+  }
+
+  const refreshGestureLibrary = async ({ reloadConfig = false } = {}) => {
+    if (!window.api?.listGestures) return
+    try {
+      const nextConfig = reloadConfig ? await loadGestureConfig() : gestureConfig
+      const activeConfig =
+        nextConfig || gestureConfig || { default_mapping: { static: {}, dynamic: {} }, user_mapping: {}, override_state: {} }
+      if (reloadConfig && nextConfig) {
+        setGestureConfig(nextConfig)
+      }
+
+      const result = await window.api.listGestures()
+      if (!result || result.ok === false) return
+      setGestures(rebuildGestureLibrary(activeConfig, result))
+    } catch (error) {
+      console.error('Failed to sync gestures from engine:', error)
+    }
+  }
+
   useEffect(() => {
-    if (!window.api?.getConfig) return
     const loadConfig = async () => {
       try {
-        const result = await window.api.getConfig()
-        if (!result || typeof result !== 'object') return
-
-        const normalizedConfig = {
-          default_mapping: result.default_mapping || { static: {}, dynamic: {} },
-          user_mapping: result.user_mapping || {},
-          override_state: result.override_state || {}
-        }
-
+        const normalizedConfig = await loadGestureConfig()
+        if (!normalizedConfig) return
         setGestureConfig(normalizedConfig)
         setGestures(getDefaultGesturesFromConfig(normalizedConfig))
       } catch (error) {
@@ -755,7 +833,7 @@ function App() {
 
   useEffect(() => {
     if (!gestureConfig?.default_mapping) return
-    void syncGestureLibraryFromEngine()
+    void refreshGestureLibrary()
   }, [gestureConfig])
 
   useEffect(() => {
@@ -816,67 +894,6 @@ function App() {
     micStreamRef.current?.getTracks().forEach((track) => track.stop())
     micStreamRef.current = null
     setMicLevel(0)
-  }
-
-  const syncGestureLibraryFromEngine = async () => {
-    if (!window.api?.listGestures) return
-    try {
-      const result = await window.api.listGestures()
-      if (!result || result.ok === false) return
-
-      const mapping = result.mapping || {}
-      const disabledStatic = new Set(mapping.disabled_static || [])
-      const baseGestures = getDefaultGesturesFromConfig(gestureConfig).map((gesture) =>
-        gesture.engineGestureName
-          ? { ...gesture, enabled: !disabledStatic.has(gesture.engineGestureName) }
-          : gesture
-      )
-
-      const defaultEngineGestures = getDefaultEngineGestureNames(gestureConfig)
-      const customHandGestures = (result.gestures || [])
-        .filter((gesture) => !defaultEngineGestures.has(gesture.name))
-        .map((gesture) => {
-          const engineAction = mapping.static_actions?.[gesture.name] || 'Click'
-          const actionLabel = describeEngineAction(engineAction)
-          return {
-            id: `hand-${gesture.label}`,
-            label: gesture.label,
-            title: gesture.name,
-            subtitle: actionLabel,
-            engineGestureName: gesture.name,
-            engineAction,
-            defaultAction: actionLabel,
-            type: 'hand',
-            family: 'Custom Static Gesture',
-            controlModel: 'static',
-            enabled: true,
-            locked: false
-          }
-        })
-
-      const customVoiceGestures = Object.entries(mapping.voice_actions || {}).map(
-        ([phrase, engineAction]) => {
-          const actionLabel = describeEngineAction(engineAction)
-          return {
-            id: `voice-${phrase.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-            title: buildVoiceGestureTitle(phrase),
-            subtitle: actionLabel,
-            engineAction,
-            defaultAction: actionLabel,
-            phrase,
-            type: 'voice',
-            family: 'Static Command Voice Family',
-            controlModel: 'static',
-            enabled: true,
-            locked: false
-          }
-        }
-      )
-
-      setGestures([...customVoiceGestures, ...customHandGestures, ...baseGestures])
-    } catch (error) {
-      console.error('Failed to sync gestures from engine:', error)
-    }
   }
 
   const persistDisabledStaticGestures = async (nextGestures) => {
@@ -976,11 +993,6 @@ function App() {
     }
     void startAppEngine()
   }, [])
-
-  useEffect(() => {
-    if (!gestureConfig?.default_mapping) return
-    void syncGestureLibraryFromEngine()
-  }, [gestureConfig])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
@@ -1349,7 +1361,7 @@ function App() {
         if (payload.gestureId) {
           setGestures((prev) => prev.filter((gesture) => gesture.id !== payload.gestureId))
         }
-        void syncGestureLibraryFromEngine()
+        void refreshGestureLibrary({ reloadConfig: true })
         setTrainingSession(null)
         return
       }
@@ -1372,7 +1384,7 @@ function App() {
           if (window.api?.completeTraining) {
             void window.api.completeTraining()
           }
-          void syncGestureLibraryFromEngine()
+          void refreshGestureLibrary({ reloadConfig: true })
           return null
         }
 
@@ -1629,7 +1641,7 @@ function App() {
       }
 
       setGestures(nextGestures)
-      void syncGestureLibraryFromEngine()
+      void refreshGestureLibrary({ reloadConfig: true })
       void notifyUser('Gesture updated', `${title} mapping has been saved.`)
       setEditingGesture(null)
     } catch (error) {
@@ -1658,7 +1670,7 @@ function App() {
       }
 
       setGestures(nextGestures)
-      void syncGestureLibraryFromEngine()
+      void refreshGestureLibrary({ reloadConfig: true })
     } catch (error) {
       void notifyUser('Gesture delete failed', error?.message || 'Please try again.', true)
       setPendingDeleteGesture(null)
@@ -1859,7 +1871,7 @@ function App() {
       if (result?.ok === false) {
         throw new Error(result.error || 'Retrain failed')
       }
-      void syncGestureLibraryFromEngine()
+      void refreshGestureLibrary({ reloadConfig: true })
       void notifyUser('Gesture ready', 'Your gesture is ready to perform.', false)
       setTrainingSession(null)
       if (currentSession.returnTab) {
@@ -1878,7 +1890,7 @@ function App() {
     const completed = trainingSession?.progress >= 100
     setTrainingSession(null)
     if (completed) {
-      void syncGestureLibraryFromEngine()
+      void refreshGestureLibrary({ reloadConfig: true })
       if (!engineStatus?.running && window.api?.startEngine) {
         void window.api.startEngine()
       }
@@ -1903,7 +1915,7 @@ function App() {
     setCameraFeedError(false)
     setCameraFeedNonce((value) => value + 1)
     if (completed) {
-      void syncGestureLibraryFromEngine()
+      void refreshGestureLibrary({ reloadConfig: true })
       if (!engineStatus?.running && window.api?.startEngine) {
         void window.api.startEngine()
       }

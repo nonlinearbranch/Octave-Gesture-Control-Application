@@ -45,6 +45,16 @@ function loadJsonConfig(filePath) {
   }
 }
 
+function loadGestureConfig() {
+  const projectRoot = resolve(__dirname, '../../..')
+  const configDir = resolve(projectRoot, 'ml/config')
+  return {
+    default_mapping: loadJsonConfig(resolve(configDir, 'default_mapping.json')),
+    user_mapping: loadJsonConfig(resolve(configDir, 'user_mapping.json')),
+    override_state: loadJsonConfig(resolve(configDir, 'override_state.json'))
+  }
+}
+
 function sendEngineCommand(command) {
   return new Promise((resolvePromise, rejectPromise) => {
     const client = net.createConnection({ host: ENGINE_HOST, port: ENGINE_PORT }, () => {
@@ -218,11 +228,69 @@ async function stopEngineProcess() {
   return { ok: true }
 }
 
-function mapListGesturesResult(result) {
-  const labels = result.gestures || []
+function mapListGesturesResult(result, config = loadGestureConfig()) {
+  const labels = Array.isArray(result.gestures) ? result.gestures : []
+  const defaultStatic = config.default_mapping?.static || {}
+  const defaultDynamic = config.default_mapping?.dynamic || {}
+  const userStatic = config.user_mapping?.static || {}
+  const userDynamic = config.user_mapping?.dynamic || {}
+  const voiceActions = result.mapping?.voice_actions || {}
+
+  const defaultStaticGestures = Object.entries(defaultStatic).map(([label, item]) => ({
+    label,
+    name: item?.name || label,
+    action: item?.action || 'None',
+    ownership: 'default',
+    controlModel: 'static',
+    type: 'hand'
+  }))
+  const defaultDynamicGestures = Object.entries(defaultDynamic).map(([label, item]) => ({
+    label,
+    name: item?.name || label,
+    action: item?.action || 'None',
+    ownership: 'default',
+    controlModel: 'dynamic',
+    type: 'hand'
+  }))
+  const customStaticGestures = Object.entries(userStatic).map(([label, item]) => ({
+    label,
+    name: item?.name || label,
+    action: item?.action || result.mapping?.static_actions?.[item?.name] || 'Click',
+    ownership: 'custom',
+    controlModel: 'static',
+    type: 'hand'
+  }))
+  const customDynamicGestures = Object.entries(userDynamic).map(([label, item]) => ({
+    label,
+    name: item?.name || label,
+    action: item?.action || result.mapping?.static_actions?.[item?.name] || 'Adjust',
+    ownership: 'custom',
+    controlModel: 'dynamic',
+    type: 'hand'
+  }))
+  const customVoiceGestures = Object.entries(voiceActions).map(([phrase, action]) => ({
+    phrase,
+    name: phrase,
+    action,
+    ownership: 'custom',
+    controlModel: 'static',
+    type: 'voice'
+  }))
+
   return {
     ok: result.ok !== false,
     gestures: labels.map((label) => ({ name: label, label })),
+    partitions: {
+      default: {
+        static: defaultStaticGestures,
+        dynamic: defaultDynamicGestures
+      },
+      custom: {
+        static: customStaticGestures,
+        dynamic: customDynamicGestures,
+        voice: customVoiceGestures
+      }
+    },
     mapping: {
       disabled_static: result.mapping?.disabled_static || [],
       static_actions: result.mapping?.static_actions || {},
@@ -315,13 +383,7 @@ app.whenReady().then(() => {
   ipcMain.handle('engine:stop', async () => stopEngineProcess())
   ipcMain.handle('engine:get-status', async () => engineStatus)
   ipcMain.handle('get-config', async () => {
-    const projectRoot = resolve(__dirname, '../../..')
-    const configDir = resolve(projectRoot, 'ml/config')
-    return {
-      default_mapping: loadJsonConfig(resolve(configDir, 'default_mapping.json')),
-      user_mapping: loadJsonConfig(resolve(configDir, 'user_mapping.json')),
-      override_state: loadJsonConfig(resolve(configDir, 'override_state.json'))
-    }
+    return loadGestureConfig()
   })
   ipcMain.handle('engine:update-settings', async (_event, payload = {}) => {
     try {
@@ -373,8 +435,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle('gestures:list', async () => {
     try {
+      const config = loadGestureConfig()
       const result = await sendEngineCommand({ command: 'list_gestures' })
-      return mapListGesturesResult(result)
+      return mapListGesturesResult(result, config)
     } catch (error) {
       return { ok: false, error: error.message }
     }
