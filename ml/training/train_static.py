@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import random
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +17,8 @@ from ml.runtime.static_inference_runner import StaticGestureModel
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATIC_DATA_DIR = ROOT_DIR / "data" / "static"
 MODEL_DIR = ROOT_DIR / "models" / "static"
+CONFIG_DIR = ROOT_DIR / "config"
+DEFAULT_MAPPING_PATH = CONFIG_DIR / "default_mapping.json"
 FEATURE_SIZE = 126
 MIN_SAMPLES = 10
 
@@ -26,7 +28,11 @@ def resolve_model_path(target: str) -> Path:
     return MODEL_DIR / f"{target}_model.pth"
 
 
-def _load_aggregated_csv(csv_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
+def _load_aggregated_csv(
+    csv_path: Path,
+    *,
+    enforce_min_samples: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:
     if not csv_path.exists():
         raise FileNotFoundError(f"Static training CSV not found: {csv_path}")
 
@@ -50,7 +56,7 @@ def _load_aggregated_csv(csv_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
             features.append(values)
             labels.append(label)
 
-    if len(features) < MIN_SAMPLES:
+    if enforce_min_samples and len(features) < MIN_SAMPLES:
         raise ValueError(
             f"Need at least {MIN_SAMPLES} static samples, got {len(features)}."
         )
@@ -58,8 +64,33 @@ def _load_aggregated_csv(csv_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
     return torch.tensor(features, dtype=torch.float32), torch.tensor(labels, dtype=torch.long)
 
 
-def _load_folder_dataset(target: str) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
-    data_dir = STATIC_DATA_DIR / target
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
+def _static_mapping() -> dict[int, str]:
+    mapping = _load_json_file(DEFAULT_MAPPING_PATH).get("static", {})
+    if not isinstance(mapping, dict):
+        return {}
+    return {
+        int(key): str(value.get("name", "")).strip()
+        for key, value in mapping.items()
+        if isinstance(value, dict) and "name" in value
+    }
+
+
+def _normalize_name(value: str) -> str:
+    return "".join(ch.lower() for ch in str(value) if ch.isalnum())
+
+
+def _load_folder_dataset_for_labels(
+    data_dir: Path,
+    label_mapping: dict[int, str],
+) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
     if not data_dir.exists() or not data_dir.is_dir():
         raise FileNotFoundError(f"Static data folder not found: {data_dir}")
 
@@ -67,12 +98,21 @@ def _load_folder_dataset(target: str) -> tuple[torch.Tensor, torch.Tensor, list[
     if not file_paths:
         raise FileNotFoundError(f"No static CSV files found in {data_dir}")
 
+    normalized_labels = {
+        _normalize_name(label_name): label_id
+        for label_id, label_name in label_mapping.items()
+    }
+
     features: list[list[float]] = []
     labels: list[int] = []
-    label_names: list[str] = []
+    seen_label_ids: set[int] = set()
 
-    for label_index, path in enumerate(file_paths):
-        label_names.append(path.stem.replace("-", "_"))
+    for path in file_paths:
+        normalized_stem = _normalize_name(path.stem)
+        if normalized_stem not in normalized_labels:
+            raise ValueError(f"No static mapping entry found for dataset file: {path.name}")
+        label_index = normalized_labels[normalized_stem]
+        seen_label_ids.add(label_index)
         with path.open("r", newline="", encoding="utf-8") as handle:
             reader = csv.reader(handle)
             for row_number, row in enumerate(reader, start=1):
@@ -95,11 +135,72 @@ def _load_folder_dataset(target: str) -> tuple[torch.Tensor, torch.Tensor, list[
             f"Need at least {MIN_SAMPLES} static samples, got {len(features)}."
         )
 
+    label_names = [label_mapping[label_id] for label_id in sorted(seen_label_ids)]
     return (
         torch.tensor(features, dtype=torch.float32),
         torch.tensor(labels, dtype=torch.long),
         label_names,
     )
+
+
+def _load_folder_dataset(target: str) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+    if target != "default":
+        raise ValueError(f"Folder dataset loading requires explicit label mapping, got target={target}")
+    return _load_folder_dataset_for_labels(STATIC_DATA_DIR / target, _static_mapping())
+
+
+def _load_custom_dataset(csv_path: Path) -> tuple[torch.Tensor, torch.Tensor]:
+    features, labels = _load_aggregated_csv(csv_path, enforce_min_samples=False)
+    return features, labels
+
+
+def _merge_datasets(
+    datasets: list[tuple[torch.Tensor, torch.Tensor]],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    present = [(features, labels) for features, labels in datasets if int(features.shape[0]) > 0]
+    if not present:
+        raise ValueError("No static training samples were loaded.")
+    merged_features = torch.cat([features for features, _ in present], dim=0)
+    merged_labels = torch.cat([labels for _, labels in present], dim=0)
+    return merged_features, merged_labels
+
+
+def _load_transfer_weights(
+    model: StaticGestureModel,
+    checkpoint_path: Path,
+    *,
+    skip_keys: set[str] | None = None,
+) -> list[str]:
+    if not checkpoint_path.exists():
+        return [f"transfer_checkpoint_missing:{checkpoint_path.name}"]
+
+    state = torch.load(checkpoint_path, map_location="cpu")
+    if isinstance(state, dict) and "net.6.weight" not in state and "model.6.weight" in state:
+        state = {
+            (key.replace("model.", "net.", 1) if key.startswith("model.") else key): value
+            for key, value in state.items()
+        }
+
+    model_state = model.state_dict()
+    applied = 0
+    skipped: list[str] = []
+    for key, value in state.items():
+        if skip_keys and key in skip_keys:
+            skipped.append(key)
+            continue
+        if key in model_state and tuple(model_state[key].shape) == tuple(value.shape):
+            model_state[key] = value
+            applied += 1
+        else:
+            skipped.append(key)
+    model.load_state_dict(model_state)
+
+    warnings: list[str] = []
+    if applied > 0:
+        warnings.append(f"transfer_learning_loaded:{checkpoint_path.name}")
+    if skipped:
+        warnings.append("transfer_learning_skipped_mismatched_output_layer")
+    return warnings
 
 
 def _inject_noise_class_if_needed(
@@ -147,13 +248,21 @@ def train_static_model(
     batch_size: int = 32,
     progress_cb: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
-    if csv_path:
-        features, labels = _load_aggregated_csv(Path(csv_path))
-        label_names: list[str] = []
+    warnings: list[str] = []
+    if target == "custom":
+        if not csv_path:
+            raise ValueError("Custom static training requires csv_path.")
+        default_features, default_labels, default_label_names = _load_folder_dataset("default")
+        custom_features, custom_labels = _load_custom_dataset(Path(csv_path))
+        features, labels = _merge_datasets(
+            [(default_features, default_labels), (custom_features, custom_labels)]
+        )
+        label_names = default_label_names
     else:
         features, labels, label_names = _load_folder_dataset(target)
 
-    features, labels, warnings = _inject_noise_class_if_needed(features, labels)
+    features, labels, noise_warnings = _inject_noise_class_if_needed(features, labels)
+    warnings.extend(noise_warnings)
     num_classes = max(int(value) for value in labels.tolist()) + 1
 
     dataset = TensorDataset(features, labels)
@@ -162,6 +271,14 @@ def train_static_model(
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
     model = StaticGestureModel(input_size=FEATURE_SIZE, num_classes=num_classes)
+    if target == "custom":
+        warnings.extend(
+            _load_transfer_weights(
+                model,
+                MODEL_DIR / "default_model.pth",
+                skip_keys={"net.6.weight", "net.6.bias", "model.6.weight", "model.6.bias"},
+            )
+        )
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 

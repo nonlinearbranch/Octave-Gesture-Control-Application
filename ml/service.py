@@ -250,51 +250,56 @@ def _list_custom_static_gestures() -> list[tuple[int, str]]:
     return gestures
 
 
+def _label_name_map(section: dict[str, Any]) -> dict[int, str]:
+    return {
+        int(key): str(value.get("name", "")).strip()
+        for key, value in section.items()
+        if isinstance(value, dict) and "name" in value
+    }
+
+
+def _merged_label_map(kind: str) -> dict[int, str]:
+    default_mapping, user_mapping = _mapping_sections()
+    if kind == "dynamic":
+        merged = _label_name_map(_dynamic_section(default_mapping))
+        merged.update(_label_name_map(_dynamic_section(user_mapping)))
+        return merged
+
+    merged = _label_name_map(_static_section(default_mapping))
+    merged.update(_label_name_map(_static_section(user_mapping)))
+    return merged
+
+
+def _default_label_floor(kind: str) -> int:
+    default_mapping, _ = _mapping_sections()
+    if kind == "dynamic":
+        label_map = _label_name_map(_dynamic_section(default_mapping))
+    else:
+        label_map = _label_name_map(_static_section(default_mapping))
+    return max(label_map.keys(), default=-1)
+
+
 def _load_runtime_static_labels() -> tuple[dict[int, str], str]:
     default_mapping, user_mapping = _mapping_sections()
     user_static = _static_section(user_mapping)
     if user_static and CUSTOM_STATIC_MODEL_PATH.exists():
-        labels = {
-            int(key): str(value.get("name", "")).strip()
-            for key, value in user_static.items()
-            if isinstance(value, dict) and "name" in value
-        }
-        return labels, str(CUSTOM_STATIC_MODEL_PATH)
-
-    default_static = _static_section(default_mapping)
-    labels = {
-        int(key): str(value.get("name", "")).strip()
-        for key, value in default_static.items()
-        if isinstance(value, dict) and "name" in value
-    }
-    return labels, str(DEFAULT_STATIC_MODEL_PATH)
+        return _merged_label_map("static"), str(CUSTOM_STATIC_MODEL_PATH)
+    return _label_name_map(_static_section(default_mapping)), str(DEFAULT_STATIC_MODEL_PATH)
 
 
 def _load_runtime_dynamic_labels() -> tuple[dict[int, str], str]:
     default_mapping, user_mapping = _mapping_sections()
     user_dynamic = _dynamic_section(user_mapping)
     if user_dynamic and CUSTOM_DYNAMIC_MODEL_PATH.exists():
-        labels = {
-            int(key): str(value.get("name", "")).strip()
-            for key, value in user_dynamic.items()
-            if isinstance(value, dict) and "name" in value
-        }
-        return labels, str(CUSTOM_DYNAMIC_MODEL_PATH)
-
-    default_dynamic = _dynamic_section(default_mapping)
-    labels = {
-        int(key): str(value.get("name", "")).strip()
-        for key, value in default_dynamic.items()
-        if isinstance(value, dict) and "name" in value
-    }
-    return labels, str(DEFAULT_DYNAMIC_MODEL_PATH)
+        return _merged_label_map("dynamic"), str(CUSTOM_DYNAMIC_MODEL_PATH)
+    return _label_name_map(_dynamic_section(default_mapping)), str(DEFAULT_DYNAMIC_MODEL_PATH)
 
 
 def _next_custom_static_label() -> int:
     gestures = _list_custom_static_gestures()
     if not gestures:
-        return 0
-    return max(label for label, _ in gestures) + 1
+        return _default_label_floor("static") + 1
+    return max(_default_label_floor("static"), max(label for label, _ in gestures)) + 1
 
 
 def _add_custom_static_gesture(name: str, action: str = "Click") -> int:
@@ -340,7 +345,10 @@ def _add_custom_dynamic_gesture(name: str, action: str = "Adjust") -> int:
             _save_json_file(USER_MAPPING_PATH, user_mapping)
             return int(key)
 
-    label = max((int(key) for key in dynamic_mapping.keys()), default=-1) + 1
+    label = max(
+        (int(key) for key in dynamic_mapping.keys()),
+        default=_default_label_floor("dynamic"),
+    ) + 1
     dynamic_mapping[str(label)] = {"name": clean_name, "action": clean_action}
     user_mapping["dynamic"] = dynamic_mapping
     if "static" not in user_mapping or not isinstance(user_mapping.get("static"), dict):
@@ -359,7 +367,8 @@ def _normalize_custom_static_labels() -> dict[str, str]:
         return {}
 
     old_labels = sorted(int(key) for key in static_mapping.keys())
-    remap = {old: new for new, old in enumerate(old_labels)}
+    start_label = _default_label_floor("static") + 1
+    remap = {old: start_label + index for index, old in enumerate(old_labels)}
     new_static = {str(remap[int(key)]): value for key, value in static_mapping.items()}
     user_mapping["static"] = new_static
     if "dynamic" not in user_mapping or not isinstance(user_mapping.get("dynamic"), dict):
@@ -383,6 +392,32 @@ def _normalize_custom_static_labels() -> dict[str, str]:
     return {
         str(key): str(value.get("name", "")).strip()
         for key, value in new_static.items()
+        if isinstance(value, dict)
+    }
+
+
+def _normalize_custom_dynamic_labels() -> dict[str, str]:
+    _, user_mapping = _mapping_sections()
+    dynamic_mapping = _dynamic_section(user_mapping)
+    if not dynamic_mapping:
+        if "static" not in user_mapping or not isinstance(user_mapping.get("static"), dict):
+            user_mapping["static"] = {}
+        user_mapping["dynamic"] = {}
+        _save_json_file(USER_MAPPING_PATH, user_mapping)
+        return {}
+
+    old_labels = sorted(int(key) for key in dynamic_mapping.keys())
+    start_label = _default_label_floor("dynamic") + 1
+    remap = {old: start_label + index for index, old in enumerate(old_labels)}
+    new_dynamic = {str(remap[int(key)]): value for key, value in dynamic_mapping.items()}
+    user_mapping["dynamic"] = new_dynamic
+    if "static" not in user_mapping or not isinstance(user_mapping.get("static"), dict):
+        user_mapping["static"] = {}
+    _save_json_file(USER_MAPPING_PATH, user_mapping)
+
+    return {
+        str(key): str(value.get("name", "")).strip()
+        for key, value in new_dynamic.items()
         if isinstance(value, dict)
     }
 
@@ -426,27 +461,24 @@ def _delete_custom_static_gesture(name_or_label: str) -> int:
 
 
 def _retrain_custom_static_model(progress_cb: Any = None) -> dict[str, Any]:
-    label_map = _normalize_custom_static_labels()
+    _normalize_custom_static_labels()
     result = train_static_model(
         target="custom",
         csv_path=str(CUSTOM_STATIC_CSV_PATH),
         model_path=str(CUSTOM_STATIC_MODEL_PATH),
         progress_cb=progress_cb,
     )
-    result["labels"] = [label_map[key] for key in sorted(label_map, key=lambda item: int(item))]
+    merged_labels = _merged_label_map("static")
+    result["labels"] = [merged_labels[key] for key in sorted(merged_labels)]
     return result
 
 
 def _retrain_custom_dynamic_model() -> dict[str, Any]:
+    _normalize_custom_dynamic_labels()
     result = train_dynamic_model(target="custom")
-    _, user_mapping = _mapping_sections()
-    dynamic_mapping = _dynamic_section(user_mapping)
+    merged_labels = _merged_label_map("dynamic")
     result["accuracy"] = result.get("val_accuracy", 0.0)
-    result["labels"] = [
-        str(value.get("name", "")).strip()
-        for key, value in sorted(dynamic_mapping.items(), key=lambda item: int(item[0]))
-        if isinstance(value, dict)
-    ]
+    result["labels"] = [merged_labels[key] for key in sorted(merged_labels)]
     return result
 
 
