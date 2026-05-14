@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #define NOMINMAX
 #ifdef _WIN32
 #    include <windows.h>
@@ -11,6 +12,11 @@
 namespace spider::heuristics {
 
 namespace {
+
+static uint64_t get_current_time_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 bool icontains(std::string_view haystack, std::string_view needle) {
     const auto lower_haystack = std::string(haystack);
@@ -136,8 +142,8 @@ void HeuristicsTracker::process_cursor(
     float index_y,
     float thumb_x,
     float thumb_y) {
-    update_cursor_position(index_x, index_y);
     update_pinch_state(index_x, index_y, thumb_x, thumb_y);
+    update_cursor_position(index_x, index_y);
 }
 
 void HeuristicsTracker::process_scroll(float index_y) {
@@ -164,22 +170,64 @@ void HeuristicsTracker::process_scroll(float index_y) {
 }
 
 void HeuristicsTracker::update_cursor_position(float index_x, float index_y) {
-    const int target_x = normalized_to_screen(index_x, screen_width_);
-    const int target_y = normalized_to_screen(index_y, screen_height_);
+    uint64_t now = get_current_time_ms();
+    if (now < freeze_cursor_until_ms_) {
+        last_raw_index_x_ = index_x;
+        last_raw_index_y_ = index_y;
+        return;
+    }
 
-    const float next_x = first_cursor_frame_
-        ? static_cast<float>(target_x)
-        : lerp(last_cursor_x_, static_cast<float>(target_x), smoothing_alpha_);
-    const float next_y = first_cursor_frame_
-        ? static_cast<float>(target_y)
-        : lerp(last_cursor_y_, static_cast<float>(target_y), smoothing_alpha_);
+    if (first_cursor_frame_) {
+        last_raw_index_x_ = index_x;
+        last_raw_index_y_ = index_y;
+#ifdef _WIN32
+        POINT p;
+        if (GetCursorPos(&p)) {
+            last_cursor_x_ = static_cast<float>(p.x);
+            last_cursor_y_ = static_cast<float>(p.y);
+        } else {
+            last_cursor_x_ = static_cast<float>(screen_width_ / 2);
+            last_cursor_y_ = static_cast<float>(screen_height_ / 2);
+        }
+#else
+        last_cursor_x_ = static_cast<float>(screen_width_ / 2);
+        last_cursor_y_ = static_cast<float>(screen_height_ / 2);
+#endif
+        first_cursor_frame_ = false;
+        return;
+    }
 
-    first_cursor_frame_ = false;
+    const float delta_x = index_x - last_raw_index_x_;
+    const float delta_y = index_y - last_raw_index_y_;
+    last_raw_index_x_ = index_x;
+    last_raw_index_y_ = index_y;
+
+    const float raw_movement = std::sqrt(delta_x * delta_x + delta_y * delta_y);
+
+    if (raw_movement < 0.0005F) {
+        return;
+    }
+
+    float acceleration = 1.0F + (raw_movement * 40.0F);
+    
+    float target_x_delta = delta_x * static_cast<float>(screen_width_) * 1.5F * acceleration;
+    float target_y_delta = delta_y * static_cast<float>(screen_height_) * 1.5F * acceleration;
+
+    float target_x = last_cursor_x_ + target_x_delta;
+    float target_y = last_cursor_y_ + target_y_delta;
+    
+    target_x = std::max(0.0F, std::min(static_cast<float>(screen_width_ - 1), target_x));
+    target_y = std::max(0.0F, std::min(static_cast<float>(screen_height_ - 1), target_y));
+
+    float dynamic_alpha = std::max(0.15F, std::min(1.0F, raw_movement * 15.0F));
+
+    float next_x = lerp(last_cursor_x_, target_x, dynamic_alpha);
+    float next_y = lerp(last_cursor_y_, target_y, dynamic_alpha);
+
     last_cursor_x_ = next_x;
     last_cursor_y_ = next_y;
 
-    SetCursorPos(clamp_x(static_cast<int>(std::round(next_x)), 0, screen_width_ - 1),
-                 clamp_y(static_cast<int>(std::round(next_y)), 0, screen_height_ - 1));
+    SetCursorPos(static_cast<int>(std::round(next_x)), static_cast<int>(std::round(next_y)));
 }
 
 void HeuristicsTracker::update_pinch_state(
@@ -197,8 +245,10 @@ void HeuristicsTracker::update_pinch_state(
 
     if (distance < click_enter_threshold_ && !left_pressed_) {
         emit_mouse_down();
+        freeze_cursor_until_ms_ = get_current_time_ms() + 200;
     } else if (distance > click_exit_threshold_ && left_pressed_) {
         emit_mouse_up();
+        freeze_cursor_until_ms_ = get_current_time_ms() + 100;
     }
 }
 

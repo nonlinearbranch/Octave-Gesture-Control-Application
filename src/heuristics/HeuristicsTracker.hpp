@@ -50,7 +50,10 @@ private:
     float last_scroll_y_{0.0F};
     bool has_last_scroll_{false};
     bool first_cursor_frame_{true};
-    float smoothing_alpha_{0.28F};
+    float last_raw_index_x_{0.0F};
+    float last_raw_index_y_{0.0F};
+    uint64_t freeze_cursor_until_ms_{0};
+    float smoothing_alpha_{0.60F};
     float click_enter_threshold_{0.05F};
     float click_exit_threshold_{0.08F};
 };

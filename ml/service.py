@@ -125,7 +125,7 @@ class GestureStabilizer:
     def __init__(
         self,
         window_size: int = 5,
-        min_confirmation_frames: int = 3,
+        min_confirmation_frames: int = 2,
         min_confidence: float = 0.85,
     ) -> None:
         self.window_size = int(window_size)
@@ -505,9 +505,9 @@ class MlService:
         self._dynamic_last_motion_at = 0.0
         self._dynamic_motion_history: deque[float] = deque(maxlen=6)
         self._dynamic_prev_wrist: tuple[float, float] | None = None
-        self._dynamic_motion_threshold = 0.018
-        self._dynamic_idle_timeout_sec = 0.22
-        self._dynamic_min_frames = 10
+        self._dynamic_motion_threshold = 0.020
+        self._dynamic_idle_timeout_sec = 0.14
+        self._dynamic_min_frames = 8
 
         # --- PHASE 1 COMPONENTS ---
         self._camera_manager = CameraManager(camera_index=self._camera_index, width=640, height=480)
@@ -688,13 +688,20 @@ class MlService:
             return None
 
         index_tip = normalized_hand.landmarks_xyz[8]
+        
+        if label == "Two_Fingers_Extended":
+            middle_tip = normalized_hand.landmarks_xyz[12]
+            current_y = (index_tip[1] + middle_tip[1]) / 2.0
+        else:
+            current_y = index_tip[1]
+            
         value = 0.0
 
         if self._continuous_prev_index_y is not None:
-            # raw_delta is the per-frame Y movement of the index fingertip in
+            # raw_delta is the per-frame Y movement in
             # normalised coordinates (0.0–1.0).  Positive means the hand moved
             # UP in screen space (y decreases for upward movement in MediaPipe).
-            raw_delta = float(self._continuous_prev_index_y - index_tip[1])
+            raw_delta = float(self._continuous_prev_index_y - current_y)
 
             # Lighter smoothing (0.4 / 0.6) keeps the slider responsive to
             # real-time hand movement instead of lagging behind.  The old
@@ -711,7 +718,7 @@ class MlService:
             # A 6× gain brings comfortable movements into the 0.06–0.24
             # range, producing 1-4 volume/scroll steps per frame.
             value = self._continuous_smoothed_value * 6.0
-        self._continuous_prev_index_y = float(index_tip[1])
+        self._continuous_prev_index_y = float(current_y)
 
         payload = self._build_gesture_payload(label, 1.0, normalized_hand)
         payload["action"] = action
@@ -1379,8 +1386,12 @@ class MlService:
             custom_conf = None
 
             if inference_result is not None and not inference_result.is_unknown:
-                default_label = inference_result.label_name
-                default_conf = inference_result.confidence
+                if inference_result.label_name == "OK_Sign" and inference_result.confidence < 0.92:
+                    default_label = "UNKNOWN"
+                    default_conf = 0.0
+                else:
+                    default_label = inference_result.label_name
+                    default_conf = inference_result.confidence
 
             # TODO: when custom_static_runner is wired, populate custom_label
             # and custom_conf from its result here.

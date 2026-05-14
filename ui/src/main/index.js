@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, Menu } from 'electron'
 import { join, resolve } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { spawn } from 'child_process'
@@ -256,6 +256,25 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  const template = [
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn', accelerator: 'CommandOrControl+=' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ]
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+
   createWindow()
   setEngineStatus({ running: false, phase: 'stopped' })
 
