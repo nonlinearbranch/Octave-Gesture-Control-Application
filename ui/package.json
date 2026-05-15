@@ -1,7 +1,7 @@
 {
-  "name": "spider-ui",
-  "version": "0.2.0",
-  "description": "SPIDER desktop UI",
+  "name": "octave-ui",
+  "version": "1.0.0",
+  "description": "Octave - Context-Aware Spatial Interface Dashboard",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
