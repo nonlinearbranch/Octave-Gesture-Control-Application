@@ -2,9 +2,11 @@
 
 #include <cctype>
 #include <chrono>
+#include <optional>
 #include <string>
-#include <thread>
+#include <utility>
 
+#include "context/uia_helper.hpp"
 #include "core/logging.hpp"
 
 #ifdef _WIN32
@@ -18,6 +20,8 @@ namespace spider::context {
 
 #ifdef _WIN32
 namespace {
+
+ContextProvider* g_active_context_provider = nullptr;
 
 std::string get_foreground_process_name() {
     const HWND foreground = GetForegroundWindow();
@@ -65,79 +69,9 @@ std::string get_foreground_window_title() {
     return title;
 }
 
-core::ContextMode classify_process(const std::string& process_name) {
-    if (process_name.find("powerpnt") != std::string::npos ||
-        process_name.find("keynote") != std::string::npos ||
-        process_name.find("impress") != std::string::npos) {
-        return core::ContextMode::Presentation;
-    }
-
-    if (process_name.find("zoom") != std::string::npos ||
-        process_name.find("teams") != std::string::npos ||
-        process_name.find("webex") != std::string::npos ||
-        process_name.find("slack") != std::string::npos ||
-        process_name.find("discord") != std::string::npos ||
-        process_name.find("meet") != std::string::npos) {
-        return core::ContextMode::Conferencing;
-    }
-
-    if (process_name.find("photoshop") != std::string::npos ||
-        process_name.find("illustrator") != std::string::npos ||
-        process_name.find("figma") != std::string::npos ||
-        process_name.find("blender") != std::string::npos ||
-        process_name.find("sketch") != std::string::npos) {
-        return core::ContextMode::Design;
-    }
-
-    if (process_name.find("steam") != std::string::npos ||
-        process_name.find("epicgameslauncher") != std::string::npos ||
-        process_name.find("riotclient") != std::string::npos ||
-        process_name.find("valorant") != std::string::npos ||
-        process_name.find("cs2") != std::string::npos ||
-        process_name.find("dota") != std::string::npos) {
-        return core::ContextMode::Gaming;
-    }
-
-    // SPIDER's own UI runs on Electron / Node.  Classify it as Media so
-    // the Palm Slider maps to Volume when the monitoring tab is focused.
-    if (process_name.find("spider") != std::string::npos ||
-        process_name.find("electron") != std::string::npos ||
-        process_name.find("node") != std::string::npos) {
-        return core::ContextMode::Media;
-    }
-
-    if (process_name.find("chrome") != std::string::npos ||
-        process_name.find("firefox") != std::string::npos ||
-        process_name.find("msedge") != std::string::npos ||
-        process_name.find("opera") != std::string::npos ||
-        process_name.find("brave") != std::string::npos) {
-        return core::ContextMode::Browser;
-    }
-
-    if (process_name.find("vlc") != std::string::npos ||
-        process_name.find("spotify") != std::string::npos ||
-        process_name.find("wmplayer") != std::string::npos ||
-        process_name.find("groove") != std::string::npos ||
-        process_name.find("itunes") != std::string::npos ||
-        process_name.find("mpv") != std::string::npos) {
-        return core::ContextMode::Media;
-    }
-
-    if (process_name.find("code") != std::string::npos ||
-        process_name.find("devenv") != std::string::npos ||
-        process_name.find("notepad") != std::string::npos ||
-        process_name.find("sublime") != std::string::npos ||
-        process_name.find("idea") != std::string::npos ||
-        process_name.find("clion") != std::string::npos) {
-        return core::ContextMode::Editor;
-    }
-
-    return core::ContextMode::Desktop;
-}
-
 bool check_is_audio_playing() {
     bool is_playing = false;
-    
+
     IMMDeviceEnumerator* device_enumerator = nullptr;
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&device_enumerator);
     if (SUCCEEDED(hr)) {
@@ -176,87 +110,235 @@ bool check_is_audio_playing() {
         }
         device_enumerator->Release();
     }
-    
+
     return is_playing;
 }
 
 }  // namespace
 #endif
 
-ContextProvider::ContextProvider(bus::Publisher<core::ContextSnapshot> publisher)
-    : publisher_(std::move(publisher)) {}
+ContextProvider::ContextProvider(
+    bus::Publisher<core::ContextSnapshot> publisher,
+    const std::string& config_path)
+    : publisher_(std::move(publisher)),
+      registry_(config_path) {}
 
 void ContextProvider::run(std::atomic<bool>& running) {
-    std::uint64_t sequence_number = 1U;
-    core::ContextMode previous_mode = core::ContextMode::Unknown;
-    bool previous_audio = false;
-
-    std::string persistent_media_app = "";
-    auto last_audio_time = std::chrono::steady_clock::now();
+    external_running_ = &running;
+    running_.store(true);
 
 #ifdef _WIN32
+    thread_id_ = GetCurrentThreadId();
+
+    MSG queue_init{};
+    PeekMessage(&queue_init, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+
     HRESULT hr_coinit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    bool co_init_success = SUCCEEDED(hr_coinit) || hr_coinit == RPC_E_CHANGED_MODE;
+    const bool co_init_success = SUCCEEDED(hr_coinit) || hr_coinit == RPC_E_CHANGED_MODE;
+
+    g_active_context_provider = this;
+
+    foreground_hook_ = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_FOREGROUND,
+        nullptr,
+        &ContextProvider::win_event_callback,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT);
+
+    namechange_hook_ = SetWinEventHook(
+        EVENT_OBJECT_NAMECHANGE,
+        EVENT_OBJECT_NAMECHANGE,
+        nullptr,
+        &ContextProvider::win_event_callback,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT);
+
+    audio_timer_id_ = SetTimer(nullptr, 0, 2000U, &ContextProvider::timer_callback);
+
+    current_audio_state_.store(check_is_audio_playing());
+    publish_context_snapshot(GetForegroundWindow(), current_audio_state_.load());
+
+    while (running_.load() && external_running_ != nullptr && external_running_->load()) {
+        MSG msg{};
+        const BOOL ret = GetMessage(&msg, nullptr, 0, 0);
+        if (ret == 0 || ret == -1) {
+            break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    if (foreground_hook_ != nullptr) {
+        UnhookWinEvent(foreground_hook_);
+        foreground_hook_ = nullptr;
+    }
+    if (namechange_hook_ != nullptr) {
+        UnhookWinEvent(namechange_hook_);
+        namechange_hook_ = nullptr;
+    }
+    if (audio_timer_id_ != 0U) {
+        KillTimer(nullptr, audio_timer_id_);
+        audio_timer_id_ = 0U;
+    }
+
+    g_active_context_provider = nullptr;
+
+    if (co_init_success) {
+        CoUninitialize();
+    }
+#else
+    core::ContextSnapshot snapshot{};
+    snapshot.header.sequence_number = sequence_number_++;
+    snapshot.header.timestamp = std::chrono::steady_clock::now();
+    snapshot.app_id = "unknown";
+    snapshot.window_title = "Unknown";
+    snapshot.context_mode = core::ContextMode::Desktop;
+    snapshot.is_audio_playing = false;
+    publisher_.publish(snapshot);
 #endif
 
-    while (running.load()) {
-#ifdef _WIN32
-        const std::string process_name = get_foreground_process_name();
-        const std::string window_title = get_foreground_window_title();
-        core::ContextMode mode = process_name.empty()
-            ? core::ContextMode::Desktop
-            : classify_process(process_name);
+    running_.store(false);
+    external_running_ = nullptr;
+    thread_id_ = 0U;
+}
 
-        bool is_playing = check_is_audio_playing();
-        auto now = std::chrono::steady_clock::now();
-        
-        if (is_playing) {
-            persistent_media_app = process_name;
-            last_audio_time = now;
+void ContextProvider::stop() {
+    running_.store(false);
+    if (external_running_ != nullptr) {
+        external_running_->store(false);
+    }
+#ifdef _WIN32
+    if (thread_id_ != 0U) {
+        PostThreadMessage(thread_id_, WM_QUIT, 0, 0);
+    }
+#endif
+}
+
+#ifdef _WIN32
+void CALLBACK ContextProvider::win_event_callback(
+    HWINEVENTHOOK,
+    DWORD event,
+    HWND hwnd,
+    LONG,
+    LONG,
+    DWORD,
+    DWORD) {
+    if (g_active_context_provider == nullptr) {
+        return;
+    }
+    g_active_context_provider->handle_win_event(event, hwnd);
+}
+
+void CALLBACK ContextProvider::timer_callback(HWND, UINT, UINT_PTR timer_id, DWORD) {
+    if (g_active_context_provider == nullptr) {
+        return;
+    }
+    g_active_context_provider->handle_audio_timer(timer_id);
+}
+
+void ContextProvider::handle_win_event(const DWORD event, HWND hwnd) {
+    if (!running_.load() || external_running_ == nullptr || !external_running_->load()) {
+        return;
+    }
+
+    const HWND foreground = GetForegroundWindow();
+    if (foreground == nullptr) {
+        return;
+    }
+
+    if (event == EVENT_OBJECT_NAMECHANGE && hwnd != foreground) {
+        return;
+    }
+
+    publish_context_snapshot(foreground, current_audio_state_.load());
+}
+
+void ContextProvider::handle_audio_timer(const UINT_PTR timer_id) {
+    if (timer_id != audio_timer_id_ || !running_.load() || external_running_ == nullptr || !external_running_->load()) {
+        return;
+    }
+
+    const bool next_audio_state = check_is_audio_playing();
+    publish_context_snapshot(GetForegroundWindow(), next_audio_state);
+}
+
+void ContextProvider::publish_context_snapshot(HWND hwnd, const bool audio_state) {
+    const HWND foreground = hwnd != nullptr ? hwnd : GetForegroundWindow();
+    const std::string process_name = get_foreground_process_name();
+    const std::string window_title = get_foreground_window_title();
+
+    core::ContextMode mode = process_name.empty()
+        ? core::ContextMode::Desktop
+        : registry_.classify_by_process(process_name);
+
+    std::string domain;
+    if (mode == core::ContextMode::Browser && foreground != nullptr) {
+        const auto uia_started = std::chrono::steady_clock::now();
+        domain = uia::get_browser_domain(foreground);
+        const auto uia_elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - uia_started);
+        if (uia_elapsed.count() > 10) {
+            core::log_line(
+                "[Context][Warning] UIA lookup took ",
+                uia_elapsed.count(),
+                "ms for process=",
+                process_name);
         }
-        
-        if (process_name == persistent_media_app && 
-            std::chrono::duration_cast<std::chrono::minutes>(now - last_audio_time).count() < 15) {
+
+        const core::ContextMode domain_mode = registry_.classify_by_domain(domain);
+        if (domain_mode != core::ContextMode::Unknown) {
+            mode = domain_mode;
+        }
+    }
+
+    std::optional<core::ContextSnapshot> snapshot_to_publish;
+    std::string log_domain = domain.empty() ? "<none>" : domain;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        current_audio_state_.store(audio_state);
+
+        const auto now = std::chrono::steady_clock::now();
+        if (audio_state) {
+            persistent_media_app_ = process_name;
+            last_audio_time_ = now;
+        }
+
+        if (process_name == persistent_media_app_ &&
+            std::chrono::duration_cast<std::chrono::minutes>(now - last_audio_time_).count() < 15) {
             if (mode == core::ContextMode::Browser || mode == core::ContextMode::Desktop) {
                 mode = core::ContextMode::Media;
             }
         }
-#else
-        const std::string process_name = "unknown";
-        const std::string window_title = "Unknown";
-        core::ContextMode mode = core::ContextMode::Desktop;
-        bool is_playing = false;
-#endif
 
-        if (mode != previous_mode || is_playing != previous_audio) {
+        if (mode != previous_mode_ || audio_state != previous_audio_) {
             core::ContextSnapshot snapshot{};
-            snapshot.header.sequence_number = sequence_number++;
+            snapshot.header.sequence_number = sequence_number_++;
             snapshot.header.timestamp = std::chrono::steady_clock::now();
             snapshot.app_id = process_name;
             snapshot.window_title = window_title;
             snapshot.context_mode = mode;
-            snapshot.is_audio_playing = is_playing;
+            snapshot.is_audio_playing = audio_state;
+            snapshot_to_publish = snapshot;
 
-            if (publisher_.publish(snapshot)) {
-                core::log_line("[Context] ", core::to_string(mode), 
-                    is_playing ? " [Audio Active]" : "", 
-                    " (", process_name, ")");
-            }
-
-            previous_mode = mode;
-            previous_audio = is_playing;
-        }
-
-        for (int step = 0; step < 5 && running.load(); ++step) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            previous_mode_ = mode;
+            previous_audio_ = audio_state;
         }
     }
 
-#ifdef _WIN32
-    if (co_init_success) {
-        CoUninitialize();
+    if (snapshot_to_publish.has_value() && publisher_.publish(*snapshot_to_publish)) {
+        core::log_line(
+            "[ContextEvent] process=",
+            process_name.empty() ? "<unknown>" : process_name,
+            " domain=",
+            log_domain,
+            " mode=",
+            core::to_string(mode),
+            audio_state ? " [Audio Active]" : "");
     }
-#endif
 }
+#endif
 
 }  // namespace spider::context

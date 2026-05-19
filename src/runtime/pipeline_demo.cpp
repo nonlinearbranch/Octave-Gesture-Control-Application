@@ -67,7 +67,9 @@ PipelineDemo::PipelineDemo()
           mode_manager_,
           mapping_registry_,
           ml_service_client_),
-      context_provider_(context_bus_.create_publisher()),
+      context_provider_(
+          context_bus_.create_publisher(),
+          (project_root_ / "config" / "context_mapping.json").string()),
       decision_engine_(
           intent_bus_.create_subscriber(),
           context_bus_.create_subscriber(),
@@ -115,6 +117,7 @@ void PipelineDemo::stop() {
         return;
     }
 
+    context_provider_.stop();
     gesture_bus_.close();
     voice_bus_.close();
     intent_bus_.close();

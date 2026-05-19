@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
-#define NOMINMAX
 #ifdef _WIN32
 #    include <windows.h>
 #endif
